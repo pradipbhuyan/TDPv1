@@ -1232,8 +1232,31 @@ def detect_document_type(text):
     if "api_key" not in st_state:
         return "other"
 
+    raw_text = text or ""
+    text_sample = raw_text[:6000]
+
+    # Heuristic boost for technical diagrams / design docs
+    tech_keywords = [
+        "architecture", "solution architecture", "technical architecture",
+        "system architecture", "design diagram", "integration diagram",
+        "data flow", "workflow", "process flow", "orchestration",
+        "component", "module", "service", "microservice", "interface",
+        "api", "gateway", "load balancer", "kubernetes", "container",
+        "database", "sql", "cosmos db", "service bus", "power bi",
+        "etl", "bronze", "silver", "gold", "data lake", "data mart",
+        "governance", "observability", "iam", "security", "platform",
+        "hld", "lld", "technical specification", "technical requirement",
+        "non-functional requirement", "functional requirement",
+        "integration", "deployment", "cloud", "azure", "gcp", "aws"
+    ]
+
+    lowered = raw_text.lower()
+    tech_hits = sum(1 for kw in tech_keywords if kw in lowered)
+
     prompt = f"""
-Classify document into ONE label:
+You are a strict document classifier.
+
+Classify the document into EXACTLY ONE label:
 
 resume
 invoice
@@ -1243,24 +1266,47 @@ ticket
 technical_doc
 other
 
-Return only the label.
+IMPORTANT RULES:
+- Choose technical_doc for:
+  - architecture diagrams
+  - system design documents
+  - solution design documents
+  - HLD / LLD
+  - technical requirement specifications
+  - integration diagrams
+  - process/workflow diagrams for IT or engineering systems
+  - cloud platform diagrams
+  - API / data platform / infrastructure design documents
+- Choose report only for general business reports, status reports, summaries, presentations, or narrative documents that are not technical design artifacts.
+- If the document contains boxes, layers, components, systems, arrows, platform names, integration flows, or architecture terms, prefer technical_doc.
+- Do not guess resume/invoice/ticket unless strongly obvious.
+- Return only the label, nothing else.
 
-{text[:2000]}
+Technical keyword hit count: {tech_hits}
+
+DOCUMENT TEXT:
+{text_sample}
 """
     try:
         raw = invoke_llm_tracked(prompt).content.lower().strip()
     except Exception:
-        return "other"
+        raw = "other"
 
     labels = ["resume", "invoice", "receipt", "report", "ticket", "technical_doc", "other"]
+
     for label in labels:
-        if label == raw:
+        if raw == label:
             return label
+
     for label in labels:
         if label in raw:
             return label
-    return "other"
 
+    # fallback heuristic: technical docs often have sparse but strongly technical labels
+    if tech_hits >= 3:
+        return "technical_doc"
+
+    return "other"
 
 def json_to_kv_dataframe(data):
     rows = []
