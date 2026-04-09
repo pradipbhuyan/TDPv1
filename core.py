@@ -379,7 +379,7 @@ def guess_resume_name(text: str) -> str:
 def extract_structured_json(text, doc_type):
     
     if doc_type == "technical_doc":
-    return extract_technical_document_json(text)
+        return extract_technical_document_json(text)
     
     clean_text = re.sub(r"[^\x00-\x7F]+", " ", text or "")
     clean_text = clean_text.replace("{", "").replace("}", "").strip()
