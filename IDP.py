@@ -748,6 +748,14 @@ def get_suggested_questions(doc_type):
         return ["Summarize this candidate", "What skills does the candidate have?", "What is the experience?"]
     if doc_type == "ticket":
         return ["What is the ticket number?", "What is the travel date?", "What are the key details?"]
+    if doc_type == "technical_doc":
+        return [
+            "Summarize this technical document",
+            "What systems and components are involved?",
+            "What is the design flow?",
+            "What are the key technical terms?",
+            "What risks or open questions are identified?",
+        ]
     return ["What is this document?", "What are the key points?"]
 
 
@@ -1290,7 +1298,7 @@ def render_header():
 
     with col_title:
         st.markdown("## Intelligent Document Processor")
-        st.caption("AI-powered document understanding & automation")
+        st.caption("AI-powered resume, technical document, and workflow automation")
 
 
 def render_sidebar_and_upload():
@@ -1510,6 +1518,120 @@ def render_result_workspace():
 
         with st.expander("Review & Edit", expanded=True):
             render_resume_review_form()
+
+    elif doc_type == "technical_doc":
+        st.markdown("#### Professional Overview")
+        st.write(data.get("executive_overview") or "-")
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.markdown("#### Systems")
+            systems = data.get("systems", [])
+            if systems:
+                for item in systems:
+                    st.caption(f"• {item}")
+            else:
+                st.caption("-")
+
+            st.markdown("#### Components")
+            components = data.get("components", [])
+            if components:
+                for item in components:
+                    st.caption(f"• {item}")
+            else:
+                st.caption("-")
+
+            st.markdown("#### Interfaces")
+            interfaces = data.get("interfaces", [])
+            if interfaces:
+                for item in interfaces:
+                    st.caption(f"• {item}")
+            else:
+                st.caption("-")
+
+        with c2:
+            st.markdown("#### Design Flow")
+            flow = data.get("design_flow", [])
+            if flow:
+                for idx, item in enumerate(flow, start=1):
+                    st.caption(f"{idx}. {item}")
+            else:
+                st.caption("-")
+
+            st.markdown("#### Dependencies")
+            deps = data.get("dependencies", [])
+            if deps:
+                for item in deps:
+                    st.caption(f"• {item}")
+            else:
+                st.caption("-")
+
+        render_validation_summary()
+        render_confidence_table()
+
+        with st.expander("Glossary", expanded=False):
+            glossary = data.get("glossary", [])
+            if glossary:
+                rows = [{"Term": g.get("term", ""), "Meaning": g.get("meaning", "")} for g in glossary]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No glossary items extracted")
+
+        with st.expander("Requirements, Assumptions, Risks", expanded=False):
+            st.markdown("**Functional Requirements**")
+            for item in data.get("functional_requirements", []):
+                st.caption(f"• {item}")
+            if not data.get("functional_requirements"):
+                st.caption("-")
+
+            st.markdown("**Non-Functional Requirements**")
+            for item in data.get("non_functional_requirements", []):
+                st.caption(f"• {item}")
+            if not data.get("non_functional_requirements"):
+                st.caption("-")
+
+            st.markdown("**Assumptions**")
+            for item in data.get("assumptions", []):
+                st.caption(f"• {item}")
+            if not data.get("assumptions"):
+                st.caption("-")
+
+            st.markdown("**Constraints**")
+            for item in data.get("constraints", []):
+                st.caption(f"• {item}")
+            if not data.get("constraints"):
+                st.caption("-")
+
+            st.markdown("**Risks**")
+            for item in data.get("risks", []):
+                st.caption(f"• {item}")
+            if not data.get("risks"):
+                st.caption("-")
+
+            st.markdown("**Open Questions**")
+            for item in data.get("open_questions", []):
+                st.caption(f"• {item}")
+            if not data.get("open_questions"):
+                st.caption("-")
+
+        t1, t2 = st.columns(2)
+
+        with t1:
+            summary_md = result.get("summary_markdown")
+            if summary_md:
+                st.download_button(
+                    "Download Summary",
+                    data=summary_md.encode("utf-8"),
+                    file_name=result.get("file_name", "technical_summary.md"),
+                    mime="text/markdown",
+                    use_container_width=True
+                )
+
+        with t2:
+            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
+                go_to_next_batch_result()
+                st.rerun()
         
     else:
         text = st.session_state.get("full_text", "")
