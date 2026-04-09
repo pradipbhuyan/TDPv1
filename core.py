@@ -377,6 +377,10 @@ def guess_resume_name(text: str) -> str:
     return ""
 
 def extract_structured_json(text, doc_type):
+    
+    if doc_type == "technical_doc":
+    return extract_technical_document_json(text)
+    
     clean_text = re.sub(r"[^\x00-\x7F]+", " ", text or "")
     clean_text = clean_text.replace("{", "").replace("}", "").strip()
     clean_text = trim_text_for_doc_type(clean_text, doc_type)
@@ -514,6 +518,108 @@ DOCUMENT TEXT:
     except Exception as e:
         return {"error": "LLM request failed", "details": str(e)[:300]}
 
+def extract_technical_document_json(text):
+    clean_text = re.sub(r"[^\x00-\x7F]+", " ", text or "")
+    clean_text = clean_text.replace("{", "").replace("}", "").strip()
+    clean_text = clean_text[:12000]
+
+    if "api_key" not in st_state:
+        return {"error": "Missing API key"}
+
+    prompt = f"""
+You are a strict technical document analyzer.
+
+Return ONLY valid JSON.
+No markdown.
+No explanation.
+
+Use this schema:
+{{
+  "document_title": "",
+  "document_type": "",
+  "business_purpose": "",
+  "scope": "",
+  "executive_overview": "",
+  "systems": [],
+  "components": [],
+  "interfaces": [],
+  "design_flow": [],
+  "functional_requirements": [],
+  "non_functional_requirements": [],
+  "assumptions": [],
+  "constraints": [],
+  "risks": [],
+  "dependencies": [],
+  "glossary": [
+    {{
+      "term": "",
+      "meaning": ""
+    }}
+  ],
+  "open_questions": []
+}}
+
+Rules:
+- Use only information found in the document
+- Do not invent systems or requirements
+- design_flow should be a short ordered list of major steps
+- glossary should extract technical acronyms and terms when possible
+- If information is missing, use empty strings or empty arrays
+
+DOCUMENT TEXT:
+{clean_text}
+"""
+    try:
+        response = invoke_llm_tracked(prompt).content.strip()
+        parsed = safe_json_parse(response)
+
+        if not isinstance(parsed, dict):
+            parsed = {}
+
+        scalar_fields = [
+            "document_title",
+            "document_type",
+            "business_purpose",
+            "scope",
+            "executive_overview",
+        ]
+        for field in scalar_fields:
+            parsed[field] = str(parsed.get(field, "") or "")
+
+        list_fields = [
+            "systems",
+            "components",
+            "interfaces",
+            "design_flow",
+            "functional_requirements",
+            "non_functional_requirements",
+            "assumptions",
+            "constraints",
+            "risks",
+            "dependencies",
+            "open_questions",
+        ]
+        for field in list_fields:
+            parsed[field] = parsed.get(field, []) if isinstance(parsed.get(field, []), list) else []
+
+        glossary = parsed.get("glossary", [])
+        if not isinstance(glossary, list):
+            glossary = []
+
+        clean_glossary = []
+        for item in glossary:
+            if isinstance(item, dict):
+                clean_glossary.append({
+                    "term": str(item.get("term", "") or ""),
+                    "meaning": str(item.get("meaning", "") or ""),
+                })
+        parsed["glossary"] = clean_glossary
+
+        return parsed
+    except Exception as e:
+        return {"error": "Technical document extraction failed", "details": str(e)[:300]}
+
+
 # ------------------------------
 # CONFIDENCE + VALIDATION
 # ------------------------------
@@ -557,6 +663,17 @@ def build_confidence_map(data, doc_type):
         confidence["experience"] = score_scalar(data.get("experience"), strong=True)
         confidence["education"] = score_scalar(data.get("education"), strong=True)
 
+    elif doc_type == "technical_doc":
+        for field in ["document_title", "business_purpose", "scope", "executive_overview"]:
+            confidence[field] = score_scalar(
+                data.get(field),
+                strong=field in ["document_title", "executive_overview"]
+            )
+        confidence["systems"] = score_scalar(data.get("systems"), strong=True)
+        confidence["components"] = score_scalar(data.get("components"), strong=True)
+        confidence["design_flow"] = score_scalar(data.get("design_flow"), strong=True)
+        confidence["glossary"] = score_scalar(data.get("glossary"), strong=False)
+
     return confidence
 
 
@@ -598,6 +715,16 @@ def validate_document_data(data, doc_type):
             warnings.append("Education section is missing")
         if not data.get("skills"):
             warnings.append("Skills section is missing")
+
+    elif doc_type == "technical_doc":
+        if not data.get("document_title"):
+            warnings.append("Document title is missing")
+        if not data.get("executive_overview"):
+            warnings.append("Executive overview is missing")
+        if not data.get("systems") and not data.get("components"):
+            warnings.append("No systems/components identified")
+        if not data.get("design_flow"):
+            warnings.append("Design flow is missing")
 
     return {"passed": len(issues) == 0, "issues": issues, "warnings": warnings}
 
@@ -1113,6 +1240,7 @@ invoice
 receipt
 report
 ticket
+technical_doc
 other
 
 Return only the label.
@@ -1124,7 +1252,7 @@ Return only the label.
     except Exception:
         return "other"
 
-    labels = ["resume", "invoice", "receipt", "report", "ticket", "other"]
+    labels = ["resume", "invoice", "receipt", "report", "ticket", "technical_doc", "other"]
     for label in labels:
         if label == raw:
             return label
@@ -1632,3 +1760,94 @@ def build_consolidated_assessment_pdf(report_data):
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
+
+def generate_technical_summary_markdown(data):
+    data = data or {}
+
+    lines = []
+    lines.append(f"# {data.get('document_title') or 'Technical Document Summary'}")
+    lines.append("")
+    lines.append("## Professional Overview")
+    lines.append(data.get("executive_overview") or "-")
+    lines.append("")
+    lines.append("## Business Purpose")
+    lines.append(data.get("business_purpose") or "-")
+    lines.append("")
+    lines.append("## Scope")
+    lines.append(data.get("scope") or "-")
+    lines.append("")
+    lines.append("## Systems")
+    for item in data.get("systems", []):
+        lines.append(f"- {item}")
+    if not data.get("systems"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Components")
+    for item in data.get("components", []):
+        lines.append(f"- {item}")
+    if not data.get("components"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Interfaces")
+    for item in data.get("interfaces", []):
+        lines.append(f"- {item}")
+    if not data.get("interfaces"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Design Flow")
+    for idx, item in enumerate(data.get("design_flow", []), start=1):
+        lines.append(f"{idx}. {item}")
+    if not data.get("design_flow"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Functional Requirements")
+    for item in data.get("functional_requirements", []):
+        lines.append(f"- {item}")
+    if not data.get("functional_requirements"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Non-Functional Requirements")
+    for item in data.get("non_functional_requirements", []):
+        lines.append(f"- {item}")
+    if not data.get("non_functional_requirements"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Assumptions")
+    for item in data.get("assumptions", []):
+        lines.append(f"- {item}")
+    if not data.get("assumptions"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Constraints")
+    for item in data.get("constraints", []):
+        lines.append(f"- {item}")
+    if not data.get("constraints"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Risks")
+    for item in data.get("risks", []):
+        lines.append(f"- {item}")
+    if not data.get("risks"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Dependencies")
+    for item in data.get("dependencies", []):
+        lines.append(f"- {item}")
+    if not data.get("dependencies"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Glossary")
+    glossary = data.get("glossary", [])
+    if glossary:
+        for item in glossary:
+            lines.append(f"- {item.get('term', '')}: {item.get('meaning', '')}")
+    else:
+        lines.append("-")
+    lines.append("")
+    lines.append("## Open Questions")
+    for item in data.get("open_questions", []):
+        lines.append(f"- {item}")
+    if not data.get("open_questions"):
+        lines.append("-")
+
+    return "\n".join(lines)
