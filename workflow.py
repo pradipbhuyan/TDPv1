@@ -12,6 +12,7 @@ from core import (
     get_current_metrics_snapshot,
     diff_metrics_snapshot,
     send_to_concur,
+    generate_technical_summary_markdown,
 )
 
 
@@ -264,6 +265,32 @@ def ticket_node(state: IDPState) -> IDPState:
 
     return state
 
+def technical_doc_node(state: IDPState) -> IDPState:
+    started_at = time.time()
+    before = get_current_metrics_snapshot()
+
+    data = state.get("data") or {}
+
+    emit_agent_event(state, "Output Agent", "running", "Preparing technical document summary")
+    safe_progress(state, 80, "Output Agent — preparing technical document summary")
+
+    summary_md = generate_technical_summary_markdown(data)
+
+    emit_agent_event(state, "Output Agent", "done", "Technical document summary prepared")
+    safe_progress(state, 95, "Output Agent — technical summary ready")
+
+    title = (data.get("document_title") or "technical_summary").strip()
+    safe_name = "".join(ch for ch in title if ch not in '\\/*?:"<>|').strip() or "technical_summary"
+
+    state["result"] = {
+        "type": "technical_doc",
+        "data": data,
+        "summary_markdown": summary_md,
+        "file_name": f"{safe_name}.md",
+    }
+
+    add_step_metric(state, "Prepare technical document summary", started_at, before, state["result"]["file_name"])
+    return state
 
 def other_node(state: IDPState) -> IDPState:
     state["result"] = {
@@ -282,8 +309,9 @@ def route(state: IDPState):
         return "invoice"
     if dt == "ticket":
         return "ticket"
+    if dt == "technical_doc":
+        return "technical_doc"
     return "other"
-
 
 def build_graph():
     builder = StateGraph(IDPState)
@@ -293,6 +321,7 @@ def build_graph():
     builder.add_node("resume", resume_node)
     builder.add_node("invoice", invoice_node)
     builder.add_node("ticket", ticket_node)
+    builder.add_node("technical_doc", technical_doc_node)
     builder.add_node("other", other_node)
 
     builder.set_entry_point("detect")
@@ -305,6 +334,7 @@ def build_graph():
             "resume": "resume",
             "invoice": "invoice",
             "ticket": "ticket",
+            "technical_doc": "technical_doc",
             "other": "other",
         }
     )
@@ -312,6 +342,9 @@ def build_graph():
     builder.add_edge("resume", END)
     builder.add_edge("invoice", END)
     builder.add_edge("ticket", END)
+    builder.add_edge("technical_doc", END)
     builder.add_edge("other", END)
 
     return builder.compile()
+
+
