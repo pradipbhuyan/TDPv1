@@ -12,4 +12,4 @@ pypdf>=4.0.0
 pymupdf>=1.24.0
 tiktoken>=0.7.0
 reportlab>=4.0.0
-requests
+
