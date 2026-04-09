@@ -1,5 +1,6 @@
 # ==============================
-# Technical Architecure PROCESSOR
+# Tech Doc PROCESSOR
+#
 # ==============================
 
 import re
@@ -48,26 +49,6 @@ from core import (
     build_consolidated_assessment_pdf,
 )
 
-from sharepoint_connector import (
-    get_cv_files_from_sharepoint,
-    get_cv_files_from_onedrive,
-)
-
-class RemoteUploadedFile:
-    def __init__(self, name: str, content: bytes):
-        self.name = name
-        self._content = content
-        self._pos = 0
-
-    def getvalue(self):
-        return self._content
-
-    def read(self):
-        return self._content
-
-    def seek(self, pos):
-        self._pos = pos
-
 # ------------------------------
 # PAGE CONFIG
 # ------------------------------
@@ -104,12 +85,12 @@ def validate_api_key(api_key):
 
 
 def login():
-    logo_path = Path(__file__).parent / "ResumeProcessor.png"
+    logo_path = Path(__file__).parent / "IDP-Logo1.png"
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col2:
         if logo_path.exists():
-            st.image(logo_path, width=300)
+            st.image(logo_path, width=220)
 
         st.markdown("### Sign In")
         username = st.text_input("Username")
@@ -192,8 +173,6 @@ DEFAULT_KEYS = {
     "live_event_placeholder": None,
     "live_pipeline_placeholder": None,
     "uploader_key": 0,
-    "source_mode": "Local Upload",
-    "remote_uploaded_files": [],
     "template_library": [],
     "active_template_index": None,
     "version_history": [],
@@ -873,35 +852,7 @@ def process_single_file(uploaded_file):
     doc_type = normalized.get("doc_type")
     result = normalized.get("result", {})
     review_data = result.get("data") or normalized.get("structured_data") or {}
-    
-    # 🚨 HARD FILTER: ONLY allow resumes
-    if doc_type != "resume":
-        record_agent_event(
-            "Classification Agent",
-            "error",
-            f"Non-CV detected: {doc_type or 'unknown'}"
-        )
-    
-        return {
-            "file_name": uploaded_file.name,
-            "status": "Exception",
-            "doc_type": doc_type or "unknown",
-            "ocr_used": extracted["ocr_used"],
-            "exception_reason": f"Not a CV/Resume (detected: {doc_type or 'unknown'})",
-    
-            # ⚠️ IMPORTANT: DO NOT PASS ANY RESULT DATA
-            "review_data": None,
-            "validation": None,
-            "confidence": None,
-            "duplicate_info": None,
-            "auto_result": None,
-            "vectorstore": None,
-            "full_text": None,
-    
-            "cost": 0.0,
-            "tokens": 0,
-        }
-    
+
     record_agent_event("Validation Agent", "running", "Checking required fields")
     validation = normalized.get("validation") or validate_document_data(review_data, doc_type)
     confidence = normalized.get("confidence") or build_confidence_map(review_data, doc_type)
@@ -1330,22 +1281,25 @@ def regenerate_resume_from_review():
 # UI
 # ------------------------------
 def render_header():
-    logo_path = Path(__file__).parent / "ResumeProcessor.png"
+    logo_path = Path(__file__).parent / "IDP-Logo1.png"
     col_logo, col_title = st.columns([1, 6], gap="small")
 
     with col_logo:
         if logo_path.exists():
-            st.image(logo_path, width=300)
+            st.image(logo_path, width=130)
 
     with col_title:
-        st.markdown("## Intelligent Resume Processor")
-        st.caption("AI-powered resume evaluation & automation")
+        st.markdown("## Intelligent Document Processor")
+        st.caption("AI-powered document understanding & automation")
+
 
 def render_sidebar_and_upload():
     with st.sidebar:
         st.write(f"Hi **{st.session_state['user']}**")
-        st.markdown("---")
 
+        #st.markdown("### Model")
+        st.markdown("---")
+        
         model_choice = st.selectbox(
             "Choose Model",
             ["gpt-4o-mini", "gpt-4o", "gpt-5"],
@@ -1369,207 +1323,34 @@ def render_sidebar_and_upload():
                     del st.session_state[key]
             st.rerun()
 
-    st.markdown("### Document Source")
+    c1, c2 = st.columns([6, 1], gap="small")
+    with c1:
+        uploaded_files = st.file_uploader(
+            f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
+            type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=f"main_file_uploader_{st.session_state.uploader_key}"
+        )
 
-    source_options = ["Local Upload", "SharePoint", "OneDrive"]
-    saved_source_mode = st.session_state.get("source_mode", "Local Upload")
-    
-    if saved_source_mode not in source_options:
-        saved_source_mode = "Local Upload"
-        st.session_state["source_mode"] = "Local Upload"
-    
-    source_mode = st.radio(
-        "Choose source",
-        source_options,
-        horizontal=True,
-        index=source_options.index(saved_source_mode),
-    )
-    
-    st.session_state["source_mode"] = source_mode
-
-    uploaded_files = []
-
-    if source_mode == "Local Upload":
-        c1, c2 = st.columns([6, 1], gap="small")
-
-        with c1:
-            uploaded_files = st.file_uploader(
-                f"Upload resume document(s) - max {MAX_BATCH_FILES} files per batch",
-                type=["txt", "pdf", "docx"],
-                accept_multiple_files=True,
-                key=f"main_file_uploader_{st.session_state.uploader_key}"
-            ) or []
-
-        with c2:
-            st.write("")
-            st.write("")
-            if st.button("Reset", use_container_width=True):
-                st.session_state.batch_results = []
-                st.session_state.exception_queue = []
-                st.session_state.active_batch_index = 0
-                st.session_state.batch_processed = False
-                st.session_state.last_batch_signature = None
-                st.session_state.show_reprocess_confirm = False
-                st.session_state.pending_batch_signature = None
-                st.session_state.batch_total_files = 0
-                st.session_state.batch_processed_files = 0
-                st.session_state.batch_current_file = None
-                st.session_state.batch_file_statuses = []
-                st.session_state.jd_rankings = []
-                st.session_state.jd_text = ""
-                st.session_state.remote_uploaded_files = []
-                st.session_state.source_mode = "Local Upload"
-                st.session_state.uploader_key += 1
-                reset_run_state()
-                st.rerun()
-
-    elif source_mode == "SharePoint":
-        st.info("Load CVs from a SharePoint site URL. This source path is intended for resume processing.")
-        st.caption("Supported remote CV types: PDF, DOCX, TXT")
-
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            sharepoint_url = st.text_input(
-                "SharePoint Site URL",
-                placeholder="https://yourtenant.sharepoint.com/sites/Recruiting",
-                key="sp_site_url"
-            )
-        with s2:
-            library_name = st.text_input(
-                "Library Name",
-                value="Documents",
-                key="sp_library_name"
-            )
-        with s3:
-            folder_path = st.text_input(
-                "Folder Path",
-                value="CVs",
-                key="sp_folder_path"
-            )
-
-        c1, c2 = st.columns([6, 1], gap="small")
-
-        with c1:
-            if st.button("Load Resume CVs from SharePoint", use_container_width=True):
-                if not sharepoint_url or not folder_path:
-                    st.warning("Please enter SharePoint Site URL and Folder Path.")
-                else:
-                    try:
-                        with st.spinner("Loading CVs from SharePoint..."):
-                            fetched = get_cv_files_from_sharepoint(
-                                site_url=sharepoint_url,
-                                folder_path=folder_path,
-                                library_name=library_name or "Documents",
-                            )
-                            remote_files = [
-                                RemoteUploadedFile(name=f["name"], content=f["content"])
-                                for f in fetched
-                            ]
-                            st.session_state["remote_uploaded_files"] = remote_files
-                            st.success(f"Loaded {len(remote_files)} CV file(s)")
-                    except Exception as e:
-                        st.error(f"Failed to load files: {str(e)}")
-
-            remote_files = st.session_state.get("remote_uploaded_files", [])
-            if remote_files:
-                st.caption(f"{len(remote_files)} CV file(s) ready from SharePoint")
-                st.write("Loaded files:")
-                for name in [f.name for f in remote_files[:10]]:
-                    st.caption(f"• {name}")
-
-        with c2:
-            st.write("")
-            st.write("")
-            if st.button("Reset", use_container_width=True, key="reset_sharepoint_source"):
-                st.session_state.batch_results = []
-                st.session_state.exception_queue = []
-                st.session_state.active_batch_index = 0
-                st.session_state.batch_processed = False
-                st.session_state.last_batch_signature = None
-                st.session_state.show_reprocess_confirm = False
-                st.session_state.pending_batch_signature = None
-                st.session_state.batch_total_files = 0
-                st.session_state.batch_processed_files = 0
-                st.session_state.batch_current_file = None
-                st.session_state.batch_file_statuses = []
-                st.session_state.jd_rankings = []
-                st.session_state.jd_text = ""
-                st.session_state.remote_uploaded_files = []
-                st.session_state.source_mode = "Local Upload"
-                reset_run_state()
-                st.rerun()
-
-        uploaded_files = st.session_state.get("remote_uploaded_files", [])
-
-    else:
-        st.info("Load CVs from OneDrive. This source path is intended for resume processing.")
-        st.caption("Supported remote CV types: PDF, DOCX, TXT")
-
-        s1, s2 = st.columns(2)
-        with s1:
-            drive_id = st.text_input(
-                "OneDrive Drive ID",
-                key="od_drive_id"
-            )
-        with s2:
-            folder_path = st.text_input(
-                "Folder Path",
-                value="CVs",
-                key="od_folder_path"
-            )
-
-        c1, c2 = st.columns([6, 1], gap="small")
-
-        with c1:
-            if st.button("Load Resume CVs from OneDrive", use_container_width=True):
-                if not drive_id or not folder_path:
-                    st.warning("Please enter OneDrive Drive ID and Folder Path.")
-                else:
-                    try:
-                        with st.spinner("Loading CVs from OneDrive..."):
-                            fetched = get_cv_files_from_onedrive(
-                                drive_id=drive_id,
-                                folder_path=folder_path,
-                            )
-                            remote_files = [
-                                RemoteUploadedFile(name=f["name"], content=f["content"])
-                                for f in fetched
-                            ]
-                            st.session_state["remote_uploaded_files"] = remote_files
-                            st.success(f"Loaded {len(remote_files)} CV file(s)")
-                    except Exception as e:
-                        st.error(f"Failed to load files: {str(e)}")
-
-            remote_files = st.session_state.get("remote_uploaded_files", [])
-            if remote_files:
-                st.caption(f"{len(remote_files)} CV file(s) ready from OneDrive")
-                st.write("Loaded files:")
-                for name in [f.name for f in remote_files[:10]]:
-                    st.caption(f"• {name}")
-
-        with c2:
-            st.write("")
-            st.write("")
-            if st.button("Reset", use_container_width=True, key="reset_onedrive_source"):
-                st.session_state.batch_results = []
-                st.session_state.exception_queue = []
-                st.session_state.active_batch_index = 0
-                st.session_state.batch_processed = False
-                st.session_state.last_batch_signature = None
-                st.session_state.show_reprocess_confirm = False
-                st.session_state.pending_batch_signature = None
-                st.session_state.batch_total_files = 0
-                st.session_state.batch_processed_files = 0
-                st.session_state.batch_current_file = None
-                st.session_state.batch_file_statuses = []
-                st.session_state.jd_rankings = []
-                st.session_state.jd_text = ""
-                st.session_state.remote_uploaded_files = []
-                st.session_state.source_mode = "Local Upload"
-                reset_run_state()
-                st.rerun()
-
-        uploaded_files = st.session_state.get("remote_uploaded_files", [])
+    with c2:
+        st.write("")
+        st.write("")
+        if st.button("Reset", use_container_width=True):
+            st.session_state.batch_results = []
+            st.session_state.exception_queue = []
+            st.session_state.batch_processed = False
+            st.session_state.last_batch_signature = None
+            st.session_state.show_reprocess_confirm = False
+            st.session_state.pending_batch_signature = None
+            st.session_state.batch_total_files = 0
+            st.session_state.batch_processed_files = 0
+            st.session_state.batch_current_file = None
+            st.session_state.batch_file_statuses = []
+            st.session_state.jd_rankings = []
+            st.session_state.jd_text = ""
+            st.session_state.uploader_key += 1
+            reset_run_state()
+            st.rerun()
 
     if uploaded_files and len(uploaded_files) > MAX_BATCH_FILES:
         st.error(f"Batch limit exceeded. Maximum allowed is {MAX_BATCH_FILES} files.")
@@ -1933,24 +1714,34 @@ def render_version_history():
 def render_batch_downloads():
     st.markdown("### Batch Downloads")
 
-    resume_count, _ = get_batch_download_counts()
+    resume_count, invoice_count = get_batch_download_counts()
+    d1, d2 = st.columns(2)
 
-    if resume_count > 0:
-        resume_zip = build_zip_from_batch_results("resume")
-        st.download_button(
-            label=f"Download All Resumes ({resume_count})",
-            data=resume_zip,
-            file_name="all_resumes.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
-    else:
-        st.button(
-            "Download All Resumes (0)",
-            disabled=True,
-            use_container_width=True,
-            key="dl_all_resumes_disabled"
-        )
+    with d1:
+        if resume_count > 0:
+            resume_zip = build_zip_from_batch_results("resume")
+            st.download_button(
+                label=f"Download All Resumes ({resume_count})",
+                data=resume_zip,
+                file_name="all_resumes.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+        else:
+            st.button("Download All Resumes (0)", disabled=True, use_container_width=True, key="dl_all_resumes_disabled")
+
+    with d2:
+        if invoice_count > 0:
+            invoice_zip = build_zip_from_batch_results("invoice")
+            st.download_button(
+                label=f"Download All Invoice Excels ({invoice_count})",
+                data=invoice_zip,
+                file_name="all_invoice_excels.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+        else:
+            st.button("Download All Invoice Excels (0)", disabled=True, use_container_width=True, key="dl_all_invoices_disabled")
 
 
 def render_jd_ranking():
