@@ -35,18 +35,11 @@ from reportlab.lib import colors
 
 from workflow import build_graph
 from core import (
-    build_resume,
-    send_to_concur,
     validate_document_data,
     build_confidence_map,
     classify_exception,
     extract_text_from_pdf_with_ocr_fallback,
     ocr_image_bytes_with_vlm,
-    validate_resume_template,
-    detect_duplicate_document,
-    score_resume_against_jd,
-    generate_consolidated_assessment_data,
-    build_consolidated_assessment_pdf,
 )
 
 # ------------------------------
@@ -175,11 +168,6 @@ DEFAULT_KEYS = {
     "uploader_key": 0,
     "template_library": [],
     "active_template_index": None,
-    "version_history": [],
-    "jd_text": "",
-    "jd_rankings": [],
-    "detailed_assessment_data": None,
-    "detailed_assessment_pdf": None,
 }
 for key, value in DEFAULT_KEYS.items():
     if key not in st.session_state:
@@ -192,32 +180,6 @@ if not st.session_state["logged_in"]:
 # ------------------------------
 # HELPERS
 # ------------------------------
-
-def extract_jd_text_from_upload(uploaded_file):
-    if not uploaded_file:
-        return ""
-
-    suffix = Path(uploaded_file.name).suffix.lower()
-    file_path = save_temp_file(uploaded_file)
-
-    try:
-        if suffix == ".pdf":
-            docs = PyPDFLoader(file_path).load()
-            return "\n".join(
-                [d.page_content for d in docs if getattr(d, "page_content", None)]
-            ).strip()
-
-        if suffix == ".docx":
-            return extract_docx_text(file_path).strip()
-
-    except Exception as e:
-        st.error(f"JD file read failed: {str(e)}")
-        return ""
-
-    st.warning("Unsupported JD file type. Please upload PDF or DOCX.")
-    return ""
-
-
 
 
 def reset_run_state():
@@ -310,17 +272,6 @@ def add_template_to_library(uploaded_template):
     st.session_state.active_template_index = len(st.session_state.template_library) - 1
 
 
-def save_version_snapshot(file_name, doc_type, review_data, auto_result, status, note=""):
-    snapshot = {
-        "file_name": file_name,
-        "doc_type": doc_type,
-        "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": status,
-        "note": note,
-        "review_data": deepcopy(review_data) if review_data else {},
-        "auto_result": deepcopy(auto_result) if auto_result else {},
-    }
-    st.session_state.version_history.append(snapshot)
 
 
 def extract_docx_text(file_path):
@@ -742,21 +693,13 @@ def update_progress(percent, message):
 
 
 def get_suggested_questions(doc_type):
-    if doc_type == "invoice":
-        return ["What is the total amount?", "Who is the vendor?", "What is the invoice date?"]
-    if doc_type == "resume":
-        return ["Summarize this candidate", "What skills does the candidate have?", "What is the experience?"]
-    if doc_type == "ticket":
-        return ["What is the ticket number?", "What is the travel date?", "What are the key details?"]
-    if doc_type == "technical_doc":
-        return [
-            "Summarize this technical document",
-            "What systems and components are involved?",
-            "What is the design flow?",
-            "What are the key technical terms?",
-            "What risks or open questions are identified?",
-        ]
-    return ["What is this document?", "What are the key points?"]
+    return [
+        "Summarize this architecture document",
+        "What systems and components are involved?",
+        "What is the design flow?",
+        "What assumptions and risks are identified?",
+        "What technical glossary can be extracted?",
+    ]
 
 
 def normalize_graph_result(result):
@@ -912,11 +855,12 @@ def process_single_file(uploaded_file):
     after_tokens = st.session_state["metrics"]["tokens"]
 
     status = "Completed"
-    if exception_reason:
-        status = "Exception"
-    elif not validation.get("passed", True):
-        status = "Review Needed"
-
+    if doc_type != "technical_doc":
+        if exception_reason:
+            status = "Exception"
+        elif not validation.get("passed", True):
+            status = "Review Needed"
+        
     update_progress(100, "Workflow Agent — completed")
 
     save_version_snapshot(
@@ -1052,35 +996,6 @@ def get_batch_download_counts():
             invoice_count += 1
 
     return resume_count, invoice_count
-
-
-def rank_all_resumes_against_jd():
-    jd_text = (st.session_state.get("jd_text") or "").strip()
-    if not jd_text:
-        st.warning("Please provide a JD first.")
-        return
-
-    resume_items = [
-        item for item in st.session_state.get("batch_results", [])
-        if item.get("doc_type") == "resume" and item.get("review_data")
-    ]
-
-    if not resume_items:
-        st.warning("No processed resumes found in the current batch.")
-        return
-
-    rankings = []
-    for item in resume_items:
-        resume_data = item.get("review_data") or {}
-        score = score_resume_against_jd(resume_data, jd_text)
-        score["file_name"] = item.get("file_name")
-        rankings.append(score)
-
-    rankings = sorted(rankings, key=lambda x: x.get("overall_score", 0), reverse=True)
-    for idx, row in enumerate(rankings, start=1):
-        row["rank"] = idx
-
-    st.session_state.jd_rankings = rankings
 
 
 def compact_field(label, value):
@@ -1298,7 +1213,7 @@ def render_header():
 
     with col_title:
         st.markdown("## Intelligent Document Processor")
-        st.caption("AI-powered resume, technical document, and workflow automation")
+        st.caption("AI-powered architecture, design, and specification understanding")
 
 
 def render_sidebar_and_upload():
@@ -1334,7 +1249,7 @@ def render_sidebar_and_upload():
     c1, c2 = st.columns([6, 1], gap="small")
     with c1:
         uploaded_files = st.file_uploader(
-            f"Upload document(s) - max {MAX_BATCH_FILES} files per batch",
+            f"Upload technical document(s) - max {MAX_BATCH_FILES} files per batch",
             type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"main_file_uploader_{st.session_state.uploader_key}"
@@ -1376,12 +1291,11 @@ def render_duplicate_warning():
             f"({duplicate_info.get('reason')}, score={duplicate_info.get('score')})"
         )
 
-
 def render_result_workspace():
     st.markdown("### Result")
 
     if not st.session_state.get("auto_result"):
-        st.caption("Process a document to view results.")
+        st.caption("Process a technical document to view results.")
         return
 
     doc_type = st.session_state.get("doc_type")
@@ -1392,298 +1306,122 @@ def render_result_workspace():
     total_results = len(st.session_state.get("batch_results", []))
     has_next = current_index < (total_results - 1)
 
-    if doc_type == "invoice":
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            compact_field("Vendor", str(data.get("vendor") or data.get("supplier") or "-"))
-        with c2:
-            compact_field("Invoice No", str(data.get("invoice_number") or data.get("invoice_no") or "-"))
-        with c3:
-            compact_field("Date", str(data.get("invoice_date") or "-"))
-        with c4:
-            compact_field("Total", str(data.get("total") or "-"))
+    if doc_type != "technical_doc":
+        st.caption("No technical document result available.")
+        return
 
-        if st.session_state.get("auto_result", {}).get("ocr_used"):
-            st.caption("OCR Applied")
+    st.markdown("#### Professional Overview")
+    st.write(data.get("executive_overview") or "Overview could not be fully extracted.")
 
-        render_validation_summary()
-        render_duplicate_warning()
-        render_confidence_table()
+    c1, c2 = st.columns(2)
 
-        with st.expander("Review & Edit", expanded=True):
-            render_invoice_review_form()
+    with c1:
+        st.markdown("#### Systems")
+        systems = data.get("systems", [])
+        if systems:
+            for item in systems:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No systems identified")
 
-        b1, b2, b3, b4 = st.columns(4)
-        with b1:
-            if st.button("Approve & Send to Concur", use_container_width=True, key="invoice_send"):
-                handle_invoice_or_ticket_submission("invoice")
+        st.markdown("#### Components")
+        components = data.get("components", [])
+        if components:
+            for item in components:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No components identified")
 
-        with b2:
-            excel = result.get("excel")
-            if excel:
-                st.download_button(
-                    "Download Excel",
-                    excel,
-                    f"{(data.get('invoice_number') or data.get('vendor') or 'invoice_data')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+        st.markdown("#### Interfaces")
+        interfaces = data.get("interfaces", [])
+        if interfaces:
+            for item in interfaces:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No interfaces identified")
 
-        with b3:
-            json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-            json_name = f"{(data.get('invoice_number') or data.get('vendor') or 'invoice_data')}.json"
+    with c2:
+        st.markdown("#### Design Flow")
+        flow = data.get("design_flow", [])
+        if flow:
+            for idx, item in enumerate(flow, start=1):
+                st.caption(f"{idx}. {item}")
+        else:
+            st.caption("• No design flow extracted")
+
+        st.markdown("#### Dependencies")
+        deps = data.get("dependencies", [])
+        if deps:
+            for item in deps:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No dependencies identified")
+
+    render_confidence_table()
+
+    with st.expander("Glossary", expanded=False):
+        glossary = data.get("glossary", [])
+        if glossary:
+            rows = [{"Term": g.get("term", ""), "Meaning": g.get("meaning", "")} for g in glossary]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No glossary items extracted")
+
+    with st.expander("Requirements, Assumptions, Risks", expanded=False):
+        st.markdown("**Functional Requirements**")
+        for item in data.get("functional_requirements", []):
+            st.caption(f"• {item}")
+        if not data.get("functional_requirements"):
+            st.caption("• None extracted")
+
+        st.markdown("**Non-Functional Requirements**")
+        for item in data.get("non_functional_requirements", []):
+            st.caption(f"• {item}")
+        if not data.get("non_functional_requirements"):
+            st.caption("• None extracted")
+
+        st.markdown("**Assumptions**")
+        for item in data.get("assumptions", []):
+            st.caption(f"• {item}")
+        if not data.get("assumptions"):
+            st.caption("• None extracted")
+
+        st.markdown("**Constraints**")
+        for item in data.get("constraints", []):
+            st.caption(f"• {item}")
+        if not data.get("constraints"):
+            st.caption("• None extracted")
+
+        st.markdown("**Risks**")
+        for item in data.get("risks", []):
+            st.caption(f"• {item}")
+        if not data.get("risks"):
+            st.caption("• None extracted")
+
+        st.markdown("**Open Questions**")
+        for item in data.get("open_questions", []):
+            st.caption(f"• {item}")
+        if not data.get("open_questions"):
+            st.caption("• None extracted")
+
+    t1, t2 = st.columns(2)
+
+    with t1:
+        summary_md = result.get("summary_markdown")
+        if summary_md:
             st.download_button(
-                "Download JSON",
-                json_bytes,
-                json_name,
-                mime="application/json",
-                use_container_width=True,
-                key="invoice_json_download"
+                "Download Architecture Report",
+                data=summary_md.encode("utf-8"),
+                file_name=result.get("file_name", "technical_architecture_report.md"),
+                mime="text/markdown",
+                use_container_width=True
             )
 
-        with b4:
-            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="invoice_next"):
-                go_to_next_batch_result()
-                st.rerun()
-                
-    elif doc_type == "ticket":
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            compact_field("Traveler", str(data.get("traveler_name") or "-"))
-        with c2:
-            compact_field("Airline", str(data.get("airline") or "-"))
-        with c3:
-            compact_field("Route", f"{data.get('from', '-')}" + " → " + f"{data.get('to', '-')}")
-        with c4:
-            compact_field("Amount", str(data.get("amount") or "-"))
+    with t2:
+        if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
+            go_to_next_batch_result()
+            st.rerun()
 
-        if st.session_state.get("auto_result", {}).get("ocr_used"):
-            st.caption("OCR Applied")
-
-        render_validation_summary()
-        render_duplicate_warning()
-        render_confidence_table()
-
-        with st.expander("Review & Edit", expanded=True):
-            render_ticket_review_form()
-
-        a1, a2, a3 = st.columns(3)
-        with a1:
-            if st.button("Approve & Send to Concur", use_container_width=True, key="ticket_send"):
-                handle_invoice_or_ticket_submission("ticket")
-
-        with a2:
-            json_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-            json_name = f"{(data.get('ticket_number') or data.get('traveler_name') or 'ticket_data')}.json"
-            st.download_button(
-                "Download JSON",
-                json_bytes,
-                json_name,
-                mime="application/json",
-                use_container_width=True,
-                key="ticket_json_download"
-            )
-
-        with a3:
-            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="ticket_next"):
-                go_to_next_batch_result()
-                st.rerun()
-                
-    elif doc_type == "resume":
-        st.caption(f"Output File: {result.get('file_name', 'generated_resume.docx')}")
-
-        r1, r2, r3 = st.columns(3)
-        with r1:
-            if st.button("Regenerate Resume", use_container_width=True, key="resume_regen"):
-                regenerate_resume_from_review()
-
-        with r2:
-            if result.get("file"):
-                st.download_button(
-                    "Download Resume",
-                    data=result["file"],
-                    file_name=result.get("file_name", "generated_resume.docx"),
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
-
-        with r3:
-            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="resume_next"):
-                go_to_next_batch_result()
-                st.rerun()
-                
-        render_validation_summary()
-        render_duplicate_warning()
-        render_confidence_table()
-
-        with st.expander("Review & Edit", expanded=True):
-            render_resume_review_form()
-
-    elif doc_type == "technical_doc":
-        st.markdown("#### Professional Overview")
-        st.write(data.get("executive_overview") or "-")
-
-        c1, c2 = st.columns(2)
-
-        with c1:
-            st.markdown("#### Systems")
-            systems = data.get("systems", [])
-            if systems:
-                for item in systems:
-                    st.caption(f"• {item}")
-            else:
-                st.caption("-")
-
-            st.markdown("#### Components")
-            components = data.get("components", [])
-            if components:
-                for item in components:
-                    st.caption(f"• {item}")
-            else:
-                st.caption("-")
-
-            st.markdown("#### Interfaces")
-            interfaces = data.get("interfaces", [])
-            if interfaces:
-                for item in interfaces:
-                    st.caption(f"• {item}")
-            else:
-                st.caption("-")
-
-        with c2:
-            st.markdown("#### Design Flow")
-            flow = data.get("design_flow", [])
-            if flow:
-                for idx, item in enumerate(flow, start=1):
-                    st.caption(f"{idx}. {item}")
-            else:
-                st.caption("-")
-
-            st.markdown("#### Dependencies")
-            deps = data.get("dependencies", [])
-            if deps:
-                for item in deps:
-                    st.caption(f"• {item}")
-            else:
-                st.caption("-")
-
-        render_validation_summary()
-        render_confidence_table()
-
-        with st.expander("Glossary", expanded=False):
-            glossary = data.get("glossary", [])
-            if glossary:
-                rows = [{"Term": g.get("term", ""), "Meaning": g.get("meaning", "")} for g in glossary]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-            else:
-                st.caption("No glossary items extracted")
-
-        with st.expander("Requirements, Assumptions, Risks", expanded=False):
-            st.markdown("**Functional Requirements**")
-            for item in data.get("functional_requirements", []):
-                st.caption(f"• {item}")
-            if not data.get("functional_requirements"):
-                st.caption("-")
-
-            st.markdown("**Non-Functional Requirements**")
-            for item in data.get("non_functional_requirements", []):
-                st.caption(f"• {item}")
-            if not data.get("non_functional_requirements"):
-                st.caption("-")
-
-            st.markdown("**Assumptions**")
-            for item in data.get("assumptions", []):
-                st.caption(f"• {item}")
-            if not data.get("assumptions"):
-                st.caption("-")
-
-            st.markdown("**Constraints**")
-            for item in data.get("constraints", []):
-                st.caption(f"• {item}")
-            if not data.get("constraints"):
-                st.caption("-")
-
-            st.markdown("**Risks**")
-            for item in data.get("risks", []):
-                st.caption(f"• {item}")
-            if not data.get("risks"):
-                st.caption("-")
-
-            st.markdown("**Open Questions**")
-            for item in data.get("open_questions", []):
-                st.caption(f"• {item}")
-            if not data.get("open_questions"):
-                st.caption("-")
-
-        t1, t2 = st.columns(2)
-
-        with t1:
-            summary_md = result.get("summary_markdown")
-            if summary_md:
-                st.download_button(
-                    "Download Summary",
-                    data=summary_md.encode("utf-8"),
-                    file_name=result.get("file_name", "technical_summary.md"),
-                    mime="text/markdown",
-                    use_container_width=True
-                )
-
-        with t2:
-            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
-                go_to_next_batch_result()
-                st.rerun()
-        
-    else:
-        text = st.session_state.get("full_text", "")
-        if text:
-            st.text_area("Preview", value=text[:2500], height=180, label_visibility="collapsed")
-
-        g1, g2 = st.columns(2)
-
-        with g1:
-            if st.button("Chat with Document", use_container_width=True, key="generic_chat"):
-                st.session_state["open_doc_chat"] = True
-
-        with g2:
-            if st.button("Next Document", use_container_width=True, disabled=not has_next, key="generic_next"):
-                go_to_next_batch_result()
-                st.rerun()
-
-        if st.session_state.get("open_doc_chat"):
-            st.markdown("#### Document Chat")
-
-            user_q = st.text_input("Ask a question about this document", key="generic_doc_chat_q")
-
-            if st.button("Ask", use_container_width=True, key="generic_doc_chat_ask"):
-                full_text = st.session_state.get("full_text", "")
-                if not full_text.strip():
-                    st.warning("No document text available for chat.")
-                else:
-                    try:
-                        llm = get_llm(st.session_state["api_key"], st.session_state.get("model_choice", "gpt-4o-mini"))
-                        prompt = f"""
-Answer the user's question using only the document text below.
-If the answer is not in the document, say so clearly.
-
-DOCUMENT TEXT:
-{full_text[:12000]}
-
-QUESTION:
-{user_q}
-"""
-                        answer = llm.invoke(prompt).content
-                        st.session_state.setdefault("generic_doc_chat_history", []).append({
-                            "question": user_q,
-                            "answer": answer,
-                        })
-                    except Exception as e:
-                        st.error(f"Chat failed: {str(e)}")
-
-            history = st.session_state.get("generic_doc_chat_history", [])
-            if history:
-                for item in reversed(history[-5:]):
-                    st.markdown(f"**Q:** {item['question']}")
-                    st.markdown(f"**A:** {item['answer']}")
 
 def render_batch_table():
     st.markdown("### Batch Results")
@@ -1751,19 +1489,25 @@ def render_template_manager():
     st.markdown("### Template Manager")
 
     template_upload = st.file_uploader(
-        "Upload Resume Template",
+        "Upload Architecture / HLD / LLD / SRS Template",
         type=["docx"],
         key="template_manager_uploader"
     )
 
     if template_upload and st.button("Add Template", use_container_width=True):
-        add_template_to_library(template_upload)
+        content = template_upload.getvalue()
+        entry = {
+            "name": template_upload.name,
+            "content": content,
+        }
+        st.session_state.template_library.append(entry)
+        st.session_state.active_template_index = len(st.session_state.template_library) - 1
         st.success("Template added to library")
         st.rerun()
 
     library = st.session_state.get("template_library", [])
     if not library:
-        st.caption("No custom templates uploaded. Default template will be used.")
+        st.caption("No template uploaded. The app will generate the report in the best possible format.")
         return
 
     selected = st.selectbox(
@@ -1776,376 +1520,14 @@ def render_template_manager():
     st.session_state.active_template_index = selected
 
     active = library[selected]
-    validation = active.get("validation", {})
-
-    if validation.get("valid"):
-        st.success("Template is valid")
-    else:
-        st.warning("Template is missing required placeholders")
-
-    with st.expander("Template Details", expanded=False):
-        st.write("Found placeholders:")
-        st.write(", ".join(validation.get("found_placeholders", [])) or "-")
-
-        missing = validation.get("missing_placeholders", [])
-        if missing:
-            st.write("Missing placeholders:")
-            st.write(", ".join(missing))
+    st.success(f"Active template: {active['name']}")
 
 
-def render_version_history():
-    st.markdown("### Version History")
-
-    history = st.session_state.get("version_history", [])
-    current_file = st.session_state.get("current_file")
-
-    if not history:
-        st.caption("No version history yet")
-        return
-
-    filtered = [h for h in history if h.get("file_name") == current_file] if current_file else history
-
-    if not filtered:
-        st.caption("No history for current document")
-        return
-
-    rows = []
-    for idx, item in enumerate(filtered):
-        rows.append({
-            "Version": idx + 1,
-            "Timestamp": item.get("timestamp"),
-            "Status": item.get("status"),
-            "Note": item.get("note"),
-        })
-
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=180)
-
-    selected = st.selectbox(
-        "Open version snapshot",
-        options=list(range(len(filtered))),
-        format_func=lambda i: f"Version {i+1} - {filtered[i]['timestamp']} - {filtered[i]['status']}",
-        key="version_history_selector"
-    )
-
-    if selected is not None:
-        snap = filtered[selected]
-        with st.expander("Snapshot Details", expanded=False):
-            st.json(snap.get("review_data", {}))
 
 
 def render_batch_downloads():
     st.markdown("### Batch Downloads")
-
-    resume_count, invoice_count = get_batch_download_counts()
-    d1, d2 = st.columns(2)
-
-    with d1:
-        if resume_count > 0:
-            resume_zip = build_zip_from_batch_results("resume")
-            st.download_button(
-                label=f"Download All Resumes ({resume_count})",
-                data=resume_zip,
-                file_name="all_resumes.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-        else:
-            st.button("Download All Resumes (0)", disabled=True, use_container_width=True, key="dl_all_resumes_disabled")
-
-    with d2:
-        if invoice_count > 0:
-            invoice_zip = build_zip_from_batch_results("invoice")
-            st.download_button(
-                label=f"Download All Invoice Excels ({invoice_count})",
-                data=invoice_zip,
-                file_name="all_invoice_excels.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-        else:
-            st.button("Download All Invoice Excels (0)", disabled=True, use_container_width=True, key="dl_all_invoices_disabled")
-
-
-def render_jd_ranking():
-    st.markdown("### JD Match Ranking")
-
-    c1, c2 = st.columns([2, 1], gap="medium")
-
-    with c1:
-        pasted_jd = st.text_area(
-            "Paste Job Description",
-            value=st.session_state.get("jd_text", ""),
-            height=220,
-            key="jd_text_area"
-        )
-
-    with c2:
-        jd_file = st.file_uploader(
-            "Upload JD File",
-            type=["pdf", "docx"],
-            key="jd_file_uploader"
-        )
-
-        use_uploaded_jd = st.checkbox(
-            "Use uploaded JD file",
-            value=bool(jd_file),
-            key="use_uploaded_jd_checkbox"
-        )
-
-    jd_text = pasted_jd.strip()
-
-    if jd_file and use_uploaded_jd:
-        uploaded_jd_text = extract_jd_text_from_upload(jd_file)
-        if uploaded_jd_text:
-            jd_text = uploaded_jd_text
-            with st.expander("Preview extracted JD text", expanded=False):
-                st.text_area(
-                    "Extracted JD",
-                    value=uploaded_jd_text[:5000],
-                    height=200,
-                    disabled=True,
-                    label_visibility="collapsed"
-                )
-
-    st.session_state.jd_text = jd_text
-
-    if st.button("Rank All CVs Against JD", use_container_width=True):
-        rank_all_resumes_against_jd()
-
-    rankings = st.session_state.get("jd_rankings", [])
-    if not rankings:
-        st.caption("No JD rankings yet")
-        return
-
-    rows = []
-    for item in rankings:
-        rows.append({
-            "Rank": item.get("rank"),
-            "Candidate": item.get("candidate_name"),
-            "File": item.get("file_name"),
-            "Overall": item.get("overall_score"),
-            "Skills": item.get("skills_score"),
-            "Experience": item.get("experience_score"),
-            "Education": item.get("education_score"),
-            "Recommendation": item.get("recommendation"),
-        })
-
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=240)
-
-    selected = st.selectbox(
-        "Open candidate analysis",
-        options=list(range(len(rankings))),
-        format_func=lambda i: f"#{rankings[i].get('rank')} - {rankings[i].get('candidate_name')} ({rankings[i].get('overall_score')})",
-        key="jd_candidate_selector"
-    )
-
-    if selected is not None:
-        item = rankings[selected]
-        with st.expander("Candidate Analysis", expanded=True):
-            st.markdown(f"**Candidate:** {item.get('candidate_name', '-')}")
-            st.markdown(f"**Overall Score:** {item.get('overall_score', 0)}")
-            st.markdown(f"**Recommendation:** {item.get('recommendation', '-')}")
-            st.markdown("**Matched Skills**")
-            st.write(", ".join(item.get("matched_skills", [])) or "-")
-            st.markdown("**Missing Skills**")
-            st.write(", ".join(item.get("missing_skills", [])) or "-")
-            st.markdown("**Strengths**")
-            for s in item.get("strengths", []):
-                st.caption(f"• {s}")
-            st.markdown("**Gaps**")
-            for g in item.get("gaps", []):
-                st.caption(f"• {g}")
-
-def render_detailed_assessment_report():
-    st.markdown("### Detailed Assessment Report")
-
-    if st.button("Generate Detailed Assessment", use_container_width=True):
-        jd_text = (st.session_state.get("jd_text") or "").strip()
-        batch_results = st.session_state.get("batch_results", [])
-        jd_rankings = st.session_state.get("jd_rankings", [])
-
-        resume_count = len([
-            x for x in batch_results
-            if x.get("doc_type") == "resume" and x.get("review_data")
-        ])
-
-        if resume_count == 0:
-            st.warning("No processed resumes available in the batch.")
-            return
-
-        if not jd_text:
-            st.warning("Please provide a JD first using paste or upload.")
-            return
-
-        if not jd_rankings:
-            st.warning("Please run JD ranking first.")
-            return
-
-        report_data = generate_consolidated_assessment_data(
-            batch_results=batch_results,
-            jd_text=jd_text,
-            jd_rankings=jd_rankings
-        )
-        pdf_bytes = build_consolidated_assessment_pdf(report_data)
-
-        st.session_state["detailed_assessment_data"] = report_data
-        st.session_state["detailed_assessment_pdf"] = pdf_bytes
-        st.success("Detailed assessment generated successfully.")
-
-    report_data = st.session_state.get("detailed_assessment_data")
-    pdf_bytes = st.session_state.get("detailed_assessment_pdf")
-
-    if not report_data:
-        st.caption("No detailed assessment generated yet.")
-        return
-
-    executive = report_data.get("executive_summary", {})
-    candidates = report_data.get("candidates", [])
-    final_summary = report_data.get("final_summary", {})
-    recruiter_questions = report_data.get("recruiter_questions", [])
-
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        st.metric("Candidates", executive.get("total_candidates", 0))
-    with k2:
-        st.metric("Top Match Range", executive.get("top_match_range", "-"))
-    with k3:
-        st.metric("Recommended Action", executive.get("recommended_action", "-"))
-
-    with st.expander("Executive Summary", expanded=True):
-        st.markdown("**JD Summary**")
-        st.write(executive.get("jd_summary", "-"))
-        st.markdown("**Executive Takeaway**")
-        st.write(executive.get("executive_takeaway", "-"))
-
-    st.markdown("#### Candidate Score Cards")
-    if candidates:
-        score_cols = st.columns(min(4, len(candidates)))
-        for idx, candidate in enumerate(candidates[:4]):
-            with score_cols[idx]:
-                score = int(candidate.get("overall_score", 0))
-                if score >= 85:
-                    box_color = "#e7f8ee"
-                    text_color = "#0f9d58"
-                elif score >= 70:
-                    box_color = "#fff4e5"
-                    text_color = "#b26a00"
-                else:
-                    box_color = "#fdecec"
-                    text_color = "#b42318"
-
-                st.markdown(
-                    f"""
-                    <div style="
-                        border-radius:16px;
-                        padding:16px;
-                        background:{box_color};
-                        border:1px solid #e5e7eb;
-                        min-height:130px;
-                    ">
-                        <div style="font-size:14px;font-weight:700;color:#111827;">
-                            {candidate.get('candidate_name', '-')}
-                        </div>
-                        <div style="font-size:28px;font-weight:800;color:{text_color};margin-top:6px;">
-                            {score}
-                        </div>
-                        <div style="font-size:12px;color:#4b5563;">
-                            {candidate.get('shortlist_label', '-')} • {candidate.get('recommendation', '-')}
-                        </div>
-                        <div style="font-size:12px;color:#6b7280;margin-top:8px;">
-                            {candidate.get('current_role', '-') or '-'}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-    st.markdown("#### Candidate Ranking & Shortlist Decision")
-    rows = []
-    for idx, candidate in enumerate(candidates, start=1):
-        rows.append({
-            "Rank": idx,
-            "Candidate": candidate.get("candidate_name"),
-            "File": candidate.get("file_name"),
-            "Overall Score": candidate.get("overall_score"),
-            "Recommendation": candidate.get("shortlist_label"),
-            "Fitment Progress": candidate.get("fitment_progress"),
-        })
-    if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-    st.markdown("#### Shortlist Recommendation")
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        st.success("Primary")
-        for item in final_summary.get("primary_candidates", []):
-            st.caption(f"• {item}")
-    with s2:
-        st.info("Backup")
-        for item in final_summary.get("backup_candidates", []):
-            st.caption(f"• {item}")
-    with s3:
-        st.warning("Hold")
-        for item in final_summary.get("hold_candidates", []):
-            st.caption(f"• {item}")
-
-    if candidates:
-        candidate_index = st.selectbox(
-            "Open candidate detailed view",
-            options=list(range(len(candidates))),
-            format_func=lambda i: f"{i+1}. {candidates[i].get('candidate_name', '-')}",
-            key="detailed_assessment_candidate_selector"
-        )
-
-        candidate = candidates[candidate_index]
-        with st.expander("Candidate Detailed View", expanded=True):
-            d1, d2, d3, d4 = st.columns(4)
-            with d1:
-                st.metric("Overall", candidate.get("overall_score", 0))
-            with d2:
-                st.metric("Skills", candidate.get("skills_score", 0))
-            with d3:
-                st.metric("Experience", candidate.get("experience_score", 0))
-            with d4:
-                st.metric("Education", candidate.get("education_score", 0))
-
-            st.markdown(f"**Candidate:** {candidate.get('candidate_name', '-')}")
-            st.markdown(f"**Current Role:** {candidate.get('current_role', '-') or '-'}")
-            st.markdown(f"**Location:** {candidate.get('location', '-') or '-'}")
-            st.markdown(f"**Recommendation:** {candidate.get('recommendation', '-')}")
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Matched Skills**")
-                st.write(", ".join(candidate.get("matched_skills", [])) or "-")
-                st.markdown("**Strengths**")
-                for s in candidate.get("strengths", []):
-                    st.caption(f"• {s}")
-            with c2:
-                st.markdown("**Missing Skills**")
-                st.write(", ".join(candidate.get("missing_skills", [])) or "-")
-                st.markdown("**Gaps / Risks**")
-                for g in candidate.get("gaps", []):
-                    st.caption(f"• {g}")
-
-    with st.expander("Recruiter Screening Questions", expanded=False):
-        if recruiter_questions:
-            q_rows = []
-            for item in recruiter_questions:
-                q_rows.append({
-                    "Question": item.get("question", "-"),
-                    "Expected Answer": item.get("expected_answer", "-")
-                })
-            st.dataframe(pd.DataFrame(q_rows), use_container_width=True, hide_index=True)
-
-    if pdf_bytes:
-        st.download_button(
-            "Download DetailedAssesment.pdf",
-            data=pdf_bytes,
-            file_name="DetailedAssesment.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+    st.caption("Batch download is not enabled for this technical-document version.")
 
 # ------------------------------
 # MAIN
@@ -2364,12 +1746,6 @@ st.markdown("---")
 render_batch_table()
 render_exception_queue()
 render_batch_downloads()
-
-st.markdown("---")
-render_jd_ranking()
-
-st.markdown("---")
-render_detailed_assessment_report()
 
 st.markdown("---")
 render_template_manager()
