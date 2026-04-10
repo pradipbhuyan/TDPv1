@@ -920,7 +920,7 @@ def render_confidence_table():
 
 def render_header():
     logo_path = Path(__file__).parent / "TDReader.png"
-    col_logo, col_title = st.columns([1.5, 6], gap="medium")
+    col_logo, col_title = st.columns([2, 6], gap="medium")
 
     with col_logo:
         if logo_path.exists():
