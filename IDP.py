@@ -1108,23 +1108,35 @@ def render_result_workspace():
         if not data.get("open_questions"):
             st.caption("• None extracted")
 
-    t1, t2 = st.columns(2)
+    t1, t2, t3 = st.columns(3)
 
     with t1:
         summary_md = result.get("summary_markdown")
         if summary_md:
             st.download_button(
-                "Download Architecture Report",
+                "Download MD Report",
                 data=summary_md.encode("utf-8"),
                 file_name=result.get("file_name", "technical_architecture_report.md"),
                 mime="text/markdown",
                 use_container_width=True
             )
-
+    
     with t2:
+        summary_pdf = result.get("summary_pdf")
+        if summary_pdf:
+            st.download_button(
+                "Download PDF Report",
+                data=summary_pdf,
+                file_name=result.get("pdf_file_name", "technical_architecture_report.pdf"),
+                mime="application/pdf",
+                use_container_width=True
+            )
+    
+    with t3:
         if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
             go_to_next_batch_result()
             st.rerun()
+
 
 def render_batch_table():
     st.markdown("### Batch Results")
