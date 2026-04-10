@@ -126,6 +126,7 @@ def technical_doc_node(state: IDPState) -> IDPState:
         "data": report_data,
         "summary_markdown": summary_md,
         "file_name": f"{safe_name}.md",
+        "pdf_file_name": f"{safe_name}.pdf",
     }
 
     emit_agent_event(state, "Output Agent", "done", "Architecture report prepared")
