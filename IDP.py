@@ -78,12 +78,12 @@ def validate_api_key(api_key):
 
 
 def login():
-    logo_path = Path(__file__).parent / "IDP-Logo1.png"
+    logo_path = Path(__file__).parent / "TDReader.png"
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col2:
         if logo_path.exists():
-            st.image(logo_path, width=220)
+            st.image(logo_path, width=300)
 
         st.markdown("### Sign In")
         username = st.text_input("Username")
@@ -918,12 +918,12 @@ def render_confidence_table():
 # UI
 # ------------------------------
 def render_header():
-    logo_path = Path(__file__).parent / "IDP-Logo1.png"
+    logo_path = Path(__file__).parent / "TDReader.png"
     col_logo, col_title = st.columns([1, 6], gap="small")
 
     with col_logo:
         if logo_path.exists():
-            st.image(logo_path, width=130)
+            st.image(logo_path, width=280)
 
     with col_title:
         st.markdown("## Technical Document Reader")
