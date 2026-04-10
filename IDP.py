@@ -83,7 +83,7 @@ def login():
 
     with col2:
         if logo_path.exists():
-            st.image(logo_path, width=300)
+            st.image(logo_path, width=500)
 
         st.markdown("### Sign In")
         username = st.text_input("Username")
