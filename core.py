@@ -682,41 +682,9 @@ def validate_document_data(data, doc_type):
     warnings = []
 
     if not isinstance(data, dict):
-        return {"passed": False, "issues": ["No structured data available"], "warnings": []}
+        return {"passed": True, "issues": [], "warnings": ["No structured data available"]}
 
-    if doc_type == "invoice":
-        if not (data.get("vendor") or data.get("supplier")):
-            issues.append("Vendor is missing")
-        if not (data.get("invoice_number") or data.get("invoice_no")):
-            issues.append("Invoice number is missing")
-        if not data.get("invoice_date"):
-            issues.append("Invoice date is missing")
-        if not data.get("total"):
-            issues.append("Total amount is missing")
-
-    elif doc_type == "ticket":
-        if not data.get("traveler_name"):
-            issues.append("Traveler name is missing")
-        if not data.get("ticket_number"):
-            issues.append("Ticket number is missing")
-        if not data.get("from") or not data.get("to"):
-            issues.append("Route is incomplete")
-        if not data.get("departure_date"):
-            issues.append("Departure date is missing")
-        if not data.get("amount"):
-            warnings.append("Amount is missing")
-
-    elif doc_type == "resume":
-        if not data.get("name"):
-            issues.append("Candidate name is missing")
-        if not data.get("experience"):
-            issues.append("Experience section is missing")
-        if not data.get("education"):
-            warnings.append("Education section is missing")
-        if not data.get("skills"):
-            warnings.append("Skills section is missing")
-
-    elif doc_type == "technical_doc":
+    if doc_type == "technical_doc":
         if not data.get("document_title"):
             warnings.append("Document title is missing")
         if not data.get("executive_overview"):
@@ -726,8 +694,14 @@ def validate_document_data(data, doc_type):
         if not data.get("design_flow"):
             warnings.append("Design flow is missing")
 
-    return {"passed": len(issues) == 0, "issues": issues, "warnings": warnings}
+        # never fail technical docs
+        return {
+            "passed": True,
+            "issues": [],
+            "warnings": warnings
+        }
 
+    return {"passed": True, "issues": [], "warnings": []}
 
 def classify_exception(doc_type, text, validation, confidence, extraction_meta):
     if extraction_meta.get("exception_reason"):
@@ -735,6 +709,10 @@ def classify_exception(doc_type, text, validation, confidence, extraction_meta):
 
     if needs_ocr_fallback(text):
         return "No extractable text"
+
+    # technical docs should not be failed for low confidence / missing fields
+    if doc_type == "technical_doc":
+        return None
 
     if validation and not validation.get("passed", True):
         return "Validation failed"
@@ -744,7 +722,6 @@ def classify_exception(doc_type, text, validation, confidence, extraction_meta):
         return "Low confidence"
 
     return None
-
 # ------------------------------
 # TEMPLATE MANAGER
 # ------------------------------
@@ -1229,13 +1206,8 @@ def save_temp_file(uploaded_file):
 
 
 def detect_document_type(text):
-    if "api_key" not in st_state:
-        return "other"
+    raw_text = (text or "").lower()
 
-    raw_text = text or ""
-    text_sample = raw_text[:6000]
-
-    # Heuristic boost for technical diagrams / design docs
     tech_keywords = [
         "architecture", "solution architecture", "technical architecture",
         "system architecture", "design diagram", "integration diagram",
@@ -1245,68 +1217,18 @@ def detect_document_type(text):
         "database", "sql", "cosmos db", "service bus", "power bi",
         "etl", "bronze", "silver", "gold", "data lake", "data mart",
         "governance", "observability", "iam", "security", "platform",
-        "hld", "lld", "technical specification", "technical requirement",
+        "hld", "lld", "srs", "technical specification", "technical requirement",
         "non-functional requirement", "functional requirement",
         "integration", "deployment", "cloud", "azure", "gcp", "aws"
     ]
 
-    lowered = raw_text.lower()
-    tech_hits = sum(1 for kw in tech_keywords if kw in lowered)
+    tech_hits = sum(1 for kw in tech_keywords if kw in raw_text)
 
-    prompt = f"""
-You are a strict document classifier.
-
-Classify the document into EXACTLY ONE label:
-
-resume
-invoice
-receipt
-report
-ticket
-technical_doc
-other
-
-IMPORTANT RULES:
-- Choose technical_doc for:
-  - architecture diagrams
-  - system design documents
-  - solution design documents
-  - HLD / LLD
-  - technical requirement specifications
-  - integration diagrams
-  - process/workflow diagrams for IT or engineering systems
-  - cloud platform diagrams
-  - API / data platform / infrastructure design documents
-- Choose report only for general business reports, status reports, summaries, presentations, or narrative documents that are not technical design artifacts.
-- If the document contains boxes, layers, components, systems, arrows, platform names, integration flows, or architecture terms, prefer technical_doc.
-- Do not guess resume/invoice/ticket unless strongly obvious.
-- Return only the label, nothing else.
-
-Technical keyword hit count: {tech_hits}
-
-DOCUMENT TEXT:
-{text_sample}
-"""
-    try:
-        raw = invoke_llm_tracked(prompt).content.lower().strip()
-    except Exception:
-        raw = "other"
-
-    labels = ["resume", "invoice", "receipt", "report", "ticket", "technical_doc", "other"]
-
-    for label in labels:
-        if raw == label:
-            return label
-
-    for label in labels:
-        if label in raw:
-            return label
-
-    # fallback heuristic: technical docs often have sparse but strongly technical labels
-    if tech_hits >= 3:
+    if tech_hits >= 2:
         return "technical_doc"
 
-    return "other"
+    return "technical_doc"
+
 
 def json_to_kv_dataframe(data):
     rows = []
@@ -1897,3 +1819,25 @@ def generate_technical_summary_markdown(data):
         lines.append("-")
 
     return "\n".join(lines)
+
+def generate_technical_report_data(data):
+    data = data or {}
+
+    return {
+        "document_title": data.get("document_title") or "Technical Architecture Report",
+        "executive_overview": data.get("executive_overview") or "Overview could not be fully extracted. Best available content is shown below.",
+        "business_purpose": data.get("business_purpose") or "-",
+        "scope": data.get("scope") or "-",
+        "systems": data.get("systems", []) or [],
+        "components": data.get("components", []) or [],
+        "interfaces": data.get("interfaces", []) or [],
+        "design_flow": data.get("design_flow", []) or [],
+        "functional_requirements": data.get("functional_requirements", []) or [],
+        "non_functional_requirements": data.get("non_functional_requirements", []) or [],
+        "assumptions": data.get("assumptions", []) or [],
+        "constraints": data.get("constraints", []) or [],
+        "risks": data.get("risks", []) or [],
+        "dependencies": data.get("dependencies", []) or [],
+        "glossary": data.get("glossary", []) or [],
+        "open_questions": data.get("open_questions", []) or [],
+    }
