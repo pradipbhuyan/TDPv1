@@ -920,7 +920,7 @@ def render_confidence_table():
 
 def render_header():
     logo_path = Path(__file__).parent / "TDReader.png"
-    col_logo, col_title = st.columns([1, 6], gap="small")
+    col_logo, col_title = st.columns([1.5, 6], gap="medium")
 
     with col_logo:
         if logo_path.exists():
@@ -929,7 +929,6 @@ def render_header():
     with col_title:
         st.markdown("## Technical Document Reader")
         st.caption("AI-powered architecture, design, and specification understanding")
-
 
 
 def render_sidebar_and_upload():
