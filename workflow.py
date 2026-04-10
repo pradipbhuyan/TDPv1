@@ -11,8 +11,8 @@ from core import (
     generate_technical_summary_markdown,
     generate_technical_report_data,
     build_technical_architecture_pdf,
+    build_technical_architecture_docx,
 )
-
 
 class IDPState(TypedDict, total=False):
     text: str
@@ -104,7 +104,6 @@ def extract_node(state: IDPState) -> IDPState:
     add_step_metric(state, "Extract technical document data", started_at, before, "technical_doc")
     return state
 
-
 def technical_doc_node(state: IDPState) -> IDPState:
     started_at = time.time()
     before = get_current_metrics_snapshot()
@@ -114,9 +113,10 @@ def technical_doc_node(state: IDPState) -> IDPState:
 
     summary_md = generate_technical_summary_markdown(report_data)
     summary_pdf = build_technical_architecture_pdf(report_data)
+    summary_docx = build_technical_architecture_docx(report_data)
 
-    emit_agent_event(state, "Output Agent", "running", "Preparing architecture report")
-    safe_progress(state, 85, "Output Agent — preparing architecture report")
+    emit_agent_event(state, "Output Agent", "running", "Preparing architecture report pack")
+    safe_progress(state, 85, "Output Agent — preparing architecture report pack")
 
     title = (report_data.get("document_title") or "technical_architecture_report").strip()
     safe_name = "".join(ch for ch in title if ch not in '\\/*?:"<>|').strip() or "technical_architecture_report"
@@ -126,15 +126,18 @@ def technical_doc_node(state: IDPState) -> IDPState:
         "data": report_data,
         "summary_markdown": summary_md,
         "summary_pdf": summary_pdf,
+        "summary_docx": summary_docx,
         "file_name": f"{safe_name}.md",
         "pdf_file_name": f"{safe_name}.pdf",
+        "docx_file_name": f"{safe_name}.docx",
     }
 
-    emit_agent_event(state, "Output Agent", "done", "Architecture report prepared")
-    safe_progress(state, 95, "Output Agent — architecture report ready")
+    emit_agent_event(state, "Output Agent", "done", "Architecture report pack prepared")
+    safe_progress(state, 95, "Output Agent — architecture report pack ready")
 
-    add_step_metric(state, "Prepare architecture report", started_at, before, state["result"]["file_name"])
+    add_step_metric(state, "Prepare architecture report pack", started_at, before, state["result"]["file_name"])
     return state
+
 
 def build_graph():
     builder = StateGraph(IDPState)
