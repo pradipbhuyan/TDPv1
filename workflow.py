@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, Any
 import time
 
 from langgraph.graph import StateGraph, END
@@ -17,8 +17,8 @@ class IDPState(TypedDict, total=False):
     text: str
     filename: str
     template: bytes
-    progress: any
-    event_callback: any
+    progress: Any
+    event_callback: Any
     ocr_used: bool
     extraction_mode: str
     exception_reason: str
@@ -73,8 +73,8 @@ def detect_node(state: IDPState) -> IDPState:
     started_at = time.time()
     before = get_current_metrics_snapshot()
 
-    emit_agent_event(state, "Classification Agent", "running", "Classifying document")
-    safe_progress(state, 40, "Classification Agent — classifying document")
+    emit_agent_event(state, "Classification Agent", "running", "Classifying technical document")
+    safe_progress(state, 40, "Classification Agent — classifying technical document")
 
     state["doc_type"] = detect_document_type(state.get("text", ""))
 
@@ -82,10 +82,10 @@ def detect_node(state: IDPState) -> IDPState:
         state,
         "Classification Agent",
         "done",
-        f"Document identified as {state.get('doc_type', 'other')}"
+        f"Document identified as {state.get('doc_type', 'technical_doc')}"
     )
 
-    add_step_metric(state, "Detect document type", started_at, before, state.get("doc_type", "unknown"))
+    add_step_metric(state, "Detect document type", started_at, before, state.get("doc_type", "technical_doc"))
     return state
 
 
@@ -93,33 +93,14 @@ def extract_node(state: IDPState) -> IDPState:
     started_at = time.time()
     before = get_current_metrics_snapshot()
 
-    doc_type = state.get("doc_type", "other")
+    emit_agent_event(state, "Structuring Agent", "running", "Extracting technical document structure")
+    safe_progress(state, 60, "Structuring Agent — extracting technical structure")
 
-    if doc_type == "resume":
-        emit_agent_event(state, "Structuring Agent", "running", "Extracting candidate profile")
-        safe_progress(state, 55, "Structuring Agent — extracting candidate profile")
-    elif doc_type == "invoice":
-        emit_agent_event(state, "Structuring Agent", "running", "Extracting invoice fields")
-        safe_progress(state, 55, "Structuring Agent — extracting invoice fields")
-    elif doc_type == "ticket":
-        emit_agent_event(state, "Structuring Agent", "running", "Extracting travel fields")
-        safe_progress(state, 55, "Structuring Agent — extracting travel fields")
+    state["data"] = extract_structured_json(state.get("text", ""), "technical_doc")
 
-    if doc_type in ["invoice", "ticket", "resume"]:
-        state["data"] = extract_structured_json(state.get("text", ""), doc_type)
+    emit_agent_event(state, "Structuring Agent", "done", "Technical document structure extracted")
 
-        if doc_type == "resume":
-            emit_agent_event(state, "Structuring Agent", "done", "Candidate profile extracted")
-        elif doc_type == "invoice":
-            emit_agent_event(state, "Structuring Agent", "done", "Invoice fields extracted")
-        elif doc_type == "ticket":
-            emit_agent_event(state, "Structuring Agent", "done", "Travel fields extracted")
-
-        add_step_metric(state, "Extract structured data", started_at, before, doc_type)
-    else:
-        state["data"] = {}
-        add_step_metric(state, "Skip structured extraction", started_at, before, doc_type)
-
+    add_step_metric(state, "Extract technical document data", started_at, before, "technical_doc")
     return state
 
 
@@ -151,17 +132,6 @@ def technical_doc_node(state: IDPState) -> IDPState:
     return state
 
 
-def other_node(state: IDPState) -> IDPState:
-    state["result"] = {
-        "type": "other",
-        "data": {},
-    }
-    return state
-
-
-def route(state: IDPState):
-    return "technical_doc"
-
 def build_graph():
     builder = StateGraph(IDPState)
 
@@ -175,6 +145,3 @@ def build_graph():
     builder.add_edge("technical_doc", END)
 
     return builder.compile()
-
-
-
