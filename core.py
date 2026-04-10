@@ -521,7 +521,7 @@ DOCUMENT TEXT:
 def extract_technical_document_json(text):
     clean_text = re.sub(r"[^\x00-\x7F]+", " ", text or "")
     clean_text = clean_text.replace("{", "").replace("}", "").strip()
-    clean_text = clean_text[:12000]
+    clean_text = clean_text[:14000]
 
     if "api_key" not in st_state:
         return {"error": "Missing API key"}
@@ -540,31 +540,44 @@ Use this schema:
   "business_purpose": "",
   "scope": "",
   "executive_overview": "",
+  "architecture_style": "",
+  "deployment_model": "",
+  "primary_platforms": [],
   "systems": [],
   "components": [],
   "interfaces": [],
+  "actors": [],
+  "data_entities": [],
   "design_flow": [],
+  "visual_flow": "",
   "functional_requirements": [],
   "non_functional_requirements": [],
+  "security_considerations": [],
   "assumptions": [],
   "constraints": [],
   "risks": [],
   "dependencies": [],
+  "monitoring_observability": [],
+  "integration_points": [],
   "glossary": [
     {{
       "term": "",
       "meaning": ""
     }}
   ],
-  "open_questions": []
+  "open_questions": [],
+  "recommendations": []
 }}
 
 Rules:
 - Use only information found in the document
 - Do not invent systems or requirements
-- design_flow should be a short ordered list of major steps
+- design_flow should be an ordered list of major steps
+- visual_flow should be a single-line arrow flow like:
+  System A -> API Gateway -> Service B -> Database
 - glossary should extract technical acronyms and terms when possible
 - If information is missing, use empty strings or empty arrays
+- Keep outputs concise but useful
 
 DOCUMENT TEXT:
 {clean_text}
@@ -582,22 +595,32 @@ DOCUMENT TEXT:
             "business_purpose",
             "scope",
             "executive_overview",
+            "architecture_style",
+            "deployment_model",
+            "visual_flow",
         ]
         for field in scalar_fields:
             parsed[field] = str(parsed.get(field, "") or "")
 
         list_fields = [
+            "primary_platforms",
             "systems",
             "components",
             "interfaces",
+            "actors",
+            "data_entities",
             "design_flow",
             "functional_requirements",
             "non_functional_requirements",
+            "security_considerations",
             "assumptions",
             "constraints",
             "risks",
             "dependencies",
+            "monitoring_observability",
+            "integration_points",
             "open_questions",
+            "recommendations",
         ]
         for field in list_fields:
             parsed[field] = parsed.get(field, []) if isinstance(parsed.get(field, []), list) else []
@@ -618,7 +641,6 @@ DOCUMENT TEXT:
         return parsed
     except Exception as e:
         return {"error": "Technical document extraction failed", "details": str(e)[:300]}
-
 
 # ------------------------------
 # CONFIDENCE + VALIDATION
@@ -1733,7 +1755,7 @@ def generate_technical_summary_markdown(data):
     data = data or {}
 
     lines = []
-    lines.append(f"# {data.get('document_title') or 'Technical Document Summary'}")
+    lines.append(f"# {data.get('document_title') or 'Technical Architecture Report'}")
     lines.append("")
     lines.append("## Professional Overview")
     lines.append(data.get("executive_overview") or "-")
@@ -1743,6 +1765,15 @@ def generate_technical_summary_markdown(data):
     lines.append("")
     lines.append("## Scope")
     lines.append(data.get("scope") or "-")
+    lines.append("")
+    lines.append("## Architecture Profile")
+    lines.append(f"- Architecture Style: {data.get('architecture_style') or '-'}")
+    lines.append(f"- Deployment Model: {data.get('deployment_model') or '-'}")
+    platforms = data.get("primary_platforms", [])
+    lines.append(f"- Primary Platforms: {', '.join(platforms) if platforms else '-'}")
+    lines.append("")
+    lines.append("## Visual Flow")
+    lines.append(data.get("visual_flow") or "-")
     lines.append("")
     lines.append("## Systems")
     for item in data.get("systems", []):
@@ -1762,6 +1793,18 @@ def generate_technical_summary_markdown(data):
     if not data.get("interfaces"):
         lines.append("-")
     lines.append("")
+    lines.append("## Actors")
+    for item in data.get("actors", []):
+        lines.append(f"- {item}")
+    if not data.get("actors"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Data Entities")
+    for item in data.get("data_entities", []):
+        lines.append(f"- {item}")
+    if not data.get("data_entities"):
+        lines.append("-")
+    lines.append("")
     lines.append("## Design Flow")
     for idx, item in enumerate(data.get("design_flow", []), start=1):
         lines.append(f"{idx}. {item}")
@@ -1778,6 +1821,24 @@ def generate_technical_summary_markdown(data):
     for item in data.get("non_functional_requirements", []):
         lines.append(f"- {item}")
     if not data.get("non_functional_requirements"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Security Considerations")
+    for item in data.get("security_considerations", []):
+        lines.append(f"- {item}")
+    if not data.get("security_considerations"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Integration Points")
+    for item in data.get("integration_points", []):
+        lines.append(f"- {item}")
+    if not data.get("integration_points"):
+        lines.append("-")
+    lines.append("")
+    lines.append("## Monitoring and Observability")
+    for item in data.get("monitoring_observability", []):
+        lines.append(f"- {item}")
+    if not data.get("monitoring_observability"):
         lines.append("-")
     lines.append("")
     lines.append("## Assumptions")
@@ -1804,6 +1865,12 @@ def generate_technical_summary_markdown(data):
     if not data.get("dependencies"):
         lines.append("-")
     lines.append("")
+    lines.append("## Recommendations")
+    for item in data.get("recommendations", []):
+        lines.append(f"- {item}")
+    if not data.get("recommendations"):
+        lines.append("-")
+    lines.append("")
     lines.append("## Glossary")
     glossary = data.get("glossary", [])
     if glossary:
@@ -1820,27 +1887,46 @@ def generate_technical_summary_markdown(data):
 
     return "\n".join(lines)
 
+
 def generate_technical_report_data(data):
     data = data or {}
 
+    design_flow = data.get("design_flow", []) or []
+    visual_flow = data.get("visual_flow") or ""
+
+    if not visual_flow and design_flow:
+        visual_flow = " -> ".join([str(x).strip() for x in design_flow if str(x).strip()][:8])
+
     return {
         "document_title": data.get("document_title") or "Technical Architecture Report",
+        "document_type": data.get("document_type") or "technical_doc",
         "executive_overview": data.get("executive_overview") or "Overview could not be fully extracted. Best available content is shown below.",
         "business_purpose": data.get("business_purpose") or "-",
         "scope": data.get("scope") or "-",
+        "architecture_style": data.get("architecture_style") or "-",
+        "deployment_model": data.get("deployment_model") or "-",
+        "primary_platforms": data.get("primary_platforms", []) or [],
         "systems": data.get("systems", []) or [],
         "components": data.get("components", []) or [],
         "interfaces": data.get("interfaces", []) or [],
-        "design_flow": data.get("design_flow", []) or [],
+        "actors": data.get("actors", []) or [],
+        "data_entities": data.get("data_entities", []) or [],
+        "design_flow": design_flow,
+        "visual_flow": visual_flow or "-",
         "functional_requirements": data.get("functional_requirements", []) or [],
         "non_functional_requirements": data.get("non_functional_requirements", []) or [],
+        "security_considerations": data.get("security_considerations", []) or [],
         "assumptions": data.get("assumptions", []) or [],
         "constraints": data.get("constraints", []) or [],
         "risks": data.get("risks", []) or [],
         "dependencies": data.get("dependencies", []) or [],
+        "monitoring_observability": data.get("monitoring_observability", []) or [],
+        "integration_points": data.get("integration_points", []) or [],
         "glossary": data.get("glossary", []) or [],
         "open_questions": data.get("open_questions", []) or [],
+        "recommendations": data.get("recommendations", []) or [],
     }
+
 
 def build_technical_architecture_pdf(report_data):
     report_data = report_data or {}
@@ -1916,6 +2002,10 @@ def build_technical_architecture_pdf(report_data):
     add_section("Professional Overview", report_data.get("executive_overview"))
     add_section("Business Purpose", report_data.get("business_purpose"))
     add_section("Scope", report_data.get("scope"))
+    add_section("Security Considerations", report_data.get("security_considerations"))
+    add_section("Integration Points", report_data.get("integration_points"))
+    add_section("Monitoring and Observability", report_data.get("monitoring_observability"))
+    add_section("Recommendations", report_data.get("recommendations"))
     add_section("Systems", report_data.get("systems"))
     add_section("Components", report_data.get("components"))
     add_section("Interfaces", report_data.get("interfaces"))
@@ -1931,6 +2021,10 @@ def build_technical_architecture_pdf(report_data):
 
     add_section("Functional Requirements", report_data.get("functional_requirements"))
     add_section("Non-Functional Requirements", report_data.get("non_functional_requirements"))
+    add_section("Security Considerations", report_data.get("security_considerations"))
+    add_section("Integration Points", report_data.get("integration_points"))
+    add_section("Monitoring and Observability", report_data.get("monitoring_observability"))
+    add_section("Recommendations", report_data.get("recommendations"))
     add_section("Assumptions", report_data.get("assumptions"))
     add_section("Constraints", report_data.get("constraints"))
     add_section("Risks", report_data.get("risks"))
@@ -1963,4 +2057,78 @@ def build_technical_architecture_pdf(report_data):
 
     doc.build(story)
     buffer.seek(0)
+    return buffer.getvalue()
+
+def build_technical_architecture_docx(report_data):
+    report_data = report_data or {}
+
+    doc = DocxDocument()
+
+    title = report_data.get("document_title") or "Technical Architecture Report"
+    doc.add_heading(title, level=0)
+    doc.add_paragraph("Generated by Technical Document Reader")
+
+    def add_section(title_text, value, numbered=False):
+        doc.add_heading(title_text, level=1)
+
+        if isinstance(value, list):
+            if value:
+                for idx, item in enumerate(value, start=1):
+                    if isinstance(item, dict):
+                        line = " - ".join([str(v).strip() for v in item.values() if str(v).strip()])
+                    else:
+                        line = str(item)
+                    prefix = f"{idx}. " if numbered else "• "
+                    doc.add_paragraph(f"{prefix}{line}")
+            else:
+                doc.add_paragraph("-")
+        else:
+            doc.add_paragraph(str(value or "-"))
+
+    add_section("Professional Overview", report_data.get("executive_overview"))
+    add_section("Business Purpose", report_data.get("business_purpose"))
+    add_section("Scope", report_data.get("scope"))
+
+    doc.add_heading("Architecture Profile", level=1)
+    doc.add_paragraph(f"Architecture Style: {report_data.get('architecture_style') or '-'}")
+    doc.add_paragraph(f"Deployment Model: {report_data.get('deployment_model') or '-'}")
+    platforms = report_data.get("primary_platforms", [])
+    doc.add_paragraph(f"Primary Platforms: {', '.join(platforms) if platforms else '-'}")
+
+    add_section("Visual Flow", report_data.get("visual_flow"))
+    add_section("Systems", report_data.get("systems"))
+    add_section("Components", report_data.get("components"))
+    add_section("Interfaces", report_data.get("interfaces"))
+    add_section("Actors", report_data.get("actors"))
+    add_section("Data Entities", report_data.get("data_entities"))
+    add_section("Design Flow", report_data.get("design_flow"), numbered=True)
+    add_section("Functional Requirements", report_data.get("functional_requirements"))
+    add_section("Non-Functional Requirements", report_data.get("non_functional_requirements"))
+    add_section("Security Considerations", report_data.get("security_considerations"))
+    add_section("Integration Points", report_data.get("integration_points"))
+    add_section("Monitoring and Observability", report_data.get("monitoring_observability"))
+    add_section("Assumptions", report_data.get("assumptions"))
+    add_section("Constraints", report_data.get("constraints"))
+    add_section("Risks", report_data.get("risks"))
+    add_section("Dependencies", report_data.get("dependencies"))
+    add_section("Recommendations", report_data.get("recommendations"))
+
+    doc.add_heading("Glossary", level=1)
+    glossary = report_data.get("glossary", [])
+    if glossary:
+        table = doc.add_table(rows=1, cols=2)
+        hdr = table.rows[0].cells
+        hdr[0].text = "Term"
+        hdr[1].text = "Meaning"
+        for item in glossary:
+            row = table.add_row().cells
+            row[0].text = str(item.get("term", "") or "-")
+            row[1].text = str(item.get("meaning", "") or "-")
+    else:
+        doc.add_paragraph("-")
+
+    add_section("Open Questions", report_data.get("open_questions"))
+
+    buffer = BytesIO()
+    doc.save(buffer)
     return buffer.getvalue()
