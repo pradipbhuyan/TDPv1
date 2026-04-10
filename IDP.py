@@ -920,15 +920,36 @@ def render_confidence_table():
 
 def render_header():
     logo_path = Path(__file__).parent / "TDReader.png"
+
+    st.markdown("""
+        <style>
+        .header-row {
+            display: flex;
+            align-items: center;  /* vertical alignment */
+            gap: 2rem;
+        }
+        .header-title {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     col_logo, col_title = st.columns([2, 6], gap="medium")
 
     with col_logo:
+        st.markdown('<div class="header-row">', unsafe_allow_html=True)
         if logo_path.exists():
             st.image(logo_path, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col_title:
+        st.markdown('<div class="header-title">', unsafe_allow_html=True)
         st.markdown("## Technical Document Reader")
         st.caption("AI-powered architecture, design, and specification understanding")
+        st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 def render_sidebar_and_upload():
