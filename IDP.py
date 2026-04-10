@@ -84,14 +84,11 @@ def login():
     with col2:
         if logo_path.exists():
             st.image(logo_path, use_container_width=True)
-    
-            st.markdown("### Sign In")
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            api_key = st.text_input("OpenAI API Key", type="password")
-    
-        if st.button("Login", use_container_width=True):
 
+        st.markdown("### Sign In")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        api_key = st.text_input("OpenAI API Key", type="password")
 
         if st.button("Login", use_container_width=True):
             if username not in USERS or USERS[username]["password"] != password:
