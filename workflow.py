@@ -10,6 +10,7 @@ from core import (
     diff_metrics_snapshot,
     generate_technical_summary_markdown,
     generate_technical_report_data,
+    build_technical_architecture_pdf,
 )
 
 
@@ -110,7 +111,9 @@ def technical_doc_node(state: IDPState) -> IDPState:
 
     data = state.get("data") or {}
     report_data = generate_technical_report_data(data)
+
     summary_md = generate_technical_summary_markdown(report_data)
+    summary_pdf = build_technical_architecture_pdf(report_data)
 
     emit_agent_event(state, "Output Agent", "running", "Preparing architecture report")
     safe_progress(state, 85, "Output Agent — preparing architecture report")
