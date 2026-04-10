@@ -125,6 +125,7 @@ def technical_doc_node(state: IDPState) -> IDPState:
         "type": "technical_doc",
         "data": report_data,
         "summary_markdown": summary_md,
+        "summary_pdf": summary_pdf,
         "file_name": f"{safe_name}.md",
         "pdf_file_name": f"{safe_name}.pdf",
     }
@@ -134,7 +135,6 @@ def technical_doc_node(state: IDPState) -> IDPState:
 
     add_step_metric(state, "Prepare architecture report", started_at, before, state["result"]["file_name"])
     return state
-
 
 def build_graph():
     builder = StateGraph(IDPState)
