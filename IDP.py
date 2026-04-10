@@ -920,15 +920,31 @@ def render_confidence_table():
 
 def render_header():
     logo_path = Path(__file__).parent / "TDReader.png"
-    col_logo, col_title = st.columns([1.6, 6], gap="medium")  # Increased logo column width
 
-    with col_logo:
-        if logo_path.exists():
-            st.image(logo_path, use_container_width=True)
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            import base64
+            encoded = base64.b64encode(f.read()).decode()
 
-    with col_title:
-        st.markdown("## Technical Document Reader")
-        st.caption("AI-powered architecture, design, and specification understanding")
+        st.markdown(f"""
+        <div style="
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            margin-bottom: 20px;
+        ">
+            <img src="data:image/png;base64,{encoded}" 
+                 style="height: 120px; object-fit: contain;" />
+            
+            <div>
+                <h1 style="margin: 0;">Technical Document Reader</h1>
+                <p style="margin: 0; color: #9aa0a6; font-size: 18px;">
+                    AI-powered architecture, design, and specification understanding
+                </p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
 
 
 
