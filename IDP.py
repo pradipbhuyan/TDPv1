@@ -923,7 +923,7 @@ def render_header():
 
     with col_logo:
         if logo_path.exists():
-            st.image(logo_path, width=280)
+            st.image(logo_path, width=380)
 
     with col_title:
         st.markdown("## Technical Document Reader")
