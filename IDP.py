@@ -1014,6 +1014,14 @@ def render_result_workspace():
         return
 
     st.markdown("#### Professional Overview")
+    st.markdown("#### Architecture Profile")
+    st.caption(f"Architecture Style: {data.get('architecture_style') or '-'}")
+    st.caption(f"Deployment Model: {data.get('deployment_model') or '-'}")
+    platforms = data.get("primary_platforms", [])
+    st.caption(f"Primary Platforms: {', '.join(platforms) if platforms else '-'}")
+    
+    st.markdown("#### Visual Flow")
+    st.code(data.get("visual_flow") or "No visual flow extracted", language="text")
     st.write(data.get("executive_overview") or "Overview could not be fully extracted. Best available technical details are shown below.")
 
     c1, c2 = st.columns(2)
@@ -1043,6 +1051,22 @@ def render_result_workspace():
         else:
             st.caption("• No interfaces identified")
 
+        st.markdown("#### Actors")
+        actors = data.get("actors", [])
+        if actors:
+            for item in actors:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No actors identified")
+        
+        st.markdown("#### Data Entities")
+        entities = data.get("data_entities", [])
+        if entities:
+            for item in entities:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No data entities identified")
+
     with c2:
         st.markdown("#### Design Flow")
         flow = data.get("design_flow", [])
@@ -1060,6 +1084,22 @@ def render_result_workspace():
         else:
             st.caption("• No dependencies identified")
 
+        st.markdown("#### Integration Points")
+        ints = data.get("integration_points", [])
+        if ints:
+            for item in ints:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No integration points identified")
+        
+        st.markdown("#### Monitoring and Observability")
+        obs = data.get("monitoring_observability", [])
+        if obs:
+            for item in obs:
+                st.caption(f"• {item}")
+        else:
+            st.caption("• No monitoring details identified")
+    
     render_validation_summary()
     render_confidence_table()
 
@@ -1084,6 +1124,12 @@ def render_result_workspace():
         if not data.get("non_functional_requirements"):
             st.caption("• None extracted")
 
+        st.markdown("**Security Considerations**")
+        for item in data.get("security_considerations", []):
+            st.caption(f"• {item}")
+        if not data.get("security_considerations"):
+            st.caption("• None extracted")
+
         st.markdown("**Assumptions**")
         for item in data.get("assumptions", []):
             st.caption(f"• {item}")
@@ -1102,41 +1148,57 @@ def render_result_workspace():
         if not data.get("risks"):
             st.caption("• None extracted")
 
+        st.markdown("**Recommendations**")
+        for item in data.get("recommendations", []):
+            st.caption(f"• {item}")
+        if not data.get("recommendations"):
+            st.caption("• None extracted")
+        
         st.markdown("**Open Questions**")
         for item in data.get("open_questions", []):
             st.caption(f"• {item}")
         if not data.get("open_questions"):
             st.caption("• None extracted")
 
-    t1, t2, t3 = st.columns(3)
+t1, t2, t3, t4 = st.columns(4)
 
-    with t1:
-        summary_md = result.get("summary_markdown")
-        if summary_md:
-            st.download_button(
-                "Download MD Report",
-                data=summary_md.encode("utf-8"),
-                file_name=result.get("file_name", "technical_architecture_report.md"),
-                mime="text/markdown",
-                use_container_width=True
-            )
-    
-    with t2:
-        summary_pdf = result.get("summary_pdf")
-        if summary_pdf:
-            st.download_button(
-                "Download PDF Report",
-                data=summary_pdf,
-                file_name=result.get("pdf_file_name", "technical_architecture_report.pdf"),
-                mime="application/pdf",
-                use_container_width=True
-            )
-    
-    with t3:
-        if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
-            go_to_next_batch_result()
-            st.rerun()
+with t1:
+    summary_md = result.get("summary_markdown")
+    if summary_md:
+        st.download_button(
+            "Download MD",
+            data=summary_md.encode("utf-8"),
+            file_name=result.get("file_name", "technical_architecture_report.md"),
+            mime="text/markdown",
+            use_container_width=True
+        )
 
+with t2:
+    summary_pdf = result.get("summary_pdf")
+    if summary_pdf:
+        st.download_button(
+            "Download PDF",
+            data=summary_pdf,
+            file_name=result.get("pdf_file_name", "technical_architecture_report.pdf"),
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+with t3:
+    summary_docx = result.get("summary_docx")
+    if summary_docx:
+        st.download_button(
+            "Download DOCX",
+            data=summary_docx,
+            file_name=result.get("docx_file_name", "technical_architecture_report.docx"),
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
+
+with t4:
+    if st.button("Next Document", use_container_width=True, disabled=not has_next, key="technical_doc_next"):
+        go_to_next_batch_result()
+        st.rerun()
 
 def render_batch_table():
     st.markdown("### Batch Results")
