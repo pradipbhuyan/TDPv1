@@ -22,6 +22,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.lib import colors
 
+from collections import defaultdict
+
 MODEL_PRICING = {
     "gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},
     "gpt-4o": {"input_per_1k": 0.005, "output_per_1k": 0.015},
@@ -641,6 +643,307 @@ DOCUMENT TEXT:
         return parsed
     except Exception as e:
         return {"error": "Technical document extraction failed", "details": str(e)[:300]}
+
+def normalize_excel_header(value):
+    value = str(value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "_", value)
+    value = re.sub(r"_+", "_", value).strip("_")
+    return value
+
+
+def coerce_list_value(value):
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+
+    text = str(value).strip()
+    if not text:
+        return []
+
+    # try JSON list
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    except Exception:
+        pass
+
+    # split on common separators
+    parts = re.split(r"\n|;|,|\|", text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def extract_technical_backlog_from_excel(file_path: str):
+    excel_file = pd.ExcelFile(file_path)
+    rows = []
+
+    for sheet_name in excel_file.sheet_names:
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        if df is None or df.empty:
+            continue
+
+        df.columns = [normalize_excel_header(c) for c in df.columns]
+
+        for _, row in df.iterrows():
+            item = {k: row[k] for k in df.columns}
+
+            normalized = {
+                "sheet_name": sheet_name,
+                "id": str(item.get("id", "") or item.get("story_id", "") or "").strip(),
+                "title": str(item.get("title", "") or item.get("name", "") or "").strip(),
+                "description": str(item.get("description", "") or item.get("details", "") or "").strip(),
+                "owner": str(item.get("owner", "") or item.get("team", "") or "").strip(),
+                "priority": str(item.get("priority", "") or "").strip(),
+                "complexity": str(item.get("complexity", "") or item.get("effort", "") or "").strip(),
+                "dependencies": coerce_list_value(item.get("dependencies")),
+                "acceptance_criteria": coerce_list_value(
+                    item.get("acceptance_criteria") or item.get("acceptancecriteria") or item.get("criteria")
+                ),
+                "module": str(item.get("module", "") or item.get("component", "") or "").strip(),
+                "story_type": str(item.get("story_type", "") or item.get("type", "") or "").strip(),
+                "status": str(item.get("status", "") or "").strip(),
+                "raw": {k: ("" if pd.isna(v) else v) for k, v in item.items()},
+            }
+
+            # keep only meaningful rows
+            if normalized["id"] or normalized["title"] or normalized["description"]:
+                rows.append(normalized)
+
+    return rows
+
+def generate_technical_backlog_report_data(rows):
+    rows = rows or []
+
+    owners = defaultdict(list)
+    modules = defaultdict(list)
+    priorities = defaultdict(int)
+    story_types = defaultdict(int)
+
+    all_dependencies = []
+    all_acceptance = []
+
+    for item in rows:
+        owner = item.get("owner") or "Unassigned"
+        module = item.get("module") or "General"
+        priority = item.get("priority") or "Unspecified"
+        story_type = item.get("story_type") or "General"
+
+        owners[owner].append(item)
+        modules[module].append(item)
+        priorities[priority] += 1
+        story_types[story_type] += 1
+
+        all_dependencies.extend(item.get("dependencies", []))
+        all_acceptance.extend(item.get("acceptance_criteria", []))
+
+    unique_dependencies = sorted(set([x for x in all_dependencies if x]))
+    total_items = len(rows)
+
+    overview = (
+        f"This technical backlog contains {total_items} item(s), grouped across "
+        f"{len(modules)} module(s) and {len(owners)} owner/workstream(s). "
+        f"It is converted into a structured implementation report with scope, "
+        f"story details, dependencies, and acceptance criteria."
+    )
+
+    module_summary = []
+    for module_name, items in modules.items():
+        module_summary.append(f"{module_name}: {len(items)} item(s)")
+
+    owner_summary = []
+    for owner_name, items in owners.items():
+        owner_summary.append(f"{owner_name}: {len(items)} item(s)")
+
+    recommendations = [
+        "Validate dependencies before implementation sequencing.",
+        "Review acceptance criteria completeness for each backlog item.",
+        "Group stories into frontend, backend, and integration workstreams where applicable.",
+        "Use this report as a baseline for HLD / LLD refinement and delivery planning.",
+    ]
+
+    return {
+        "document_title": "Technical Backlog Implementation Report",
+        "document_type": "technical_backlog_excel",
+        "executive_overview": overview,
+        "business_purpose": "Transform Excel backlog items into a technical implementation report.",
+        "scope": "Stories, dependencies, priorities, complexity indicators, ownership, and acceptance criteria extracted from Excel.",
+        "architecture_style": "Backlog-driven technical specification",
+        "deployment_model": "-",
+        "primary_platforms": [],
+        "systems": list(modules.keys()),
+        "components": module_summary,
+        "interfaces": [],
+        "actors": list(owners.keys()),
+        "data_entities": [],
+        "design_flow": [
+            "Read backlog rows from Excel",
+            "Normalize fields and acceptance criteria",
+            "Group by module and owner",
+            "Identify dependencies and delivery sequencing",
+            "Generate implementation-ready technical report",
+        ],
+        "visual_flow": "Excel Backlog -> Story Normalization -> Grouping -> Dependency Analysis -> Technical PDF Report",
+        "functional_requirements": [item.get("title") for item in rows if item.get("title")],
+        "non_functional_requirements": [],
+        "security_considerations": [],
+        "assumptions": [
+            "Excel rows represent backlog items or stories.",
+            "Dependencies and acceptance criteria may be partially structured.",
+        ],
+        "constraints": [
+            "Output quality depends on column quality and consistency in Excel.",
+        ],
+        "risks": [
+            "Missing or inconsistent headers may reduce extraction quality.",
+            "Dependencies may require manual validation if entered as free text.",
+        ],
+        "dependencies": unique_dependencies,
+        "monitoring_observability": [],
+        "integration_points": [],
+        "glossary": [],
+        "open_questions": [],
+        "recommendations": recommendations,
+        "story_rows": rows,
+        "owner_summary": owner_summary,
+        "priority_summary": dict(priorities),
+        "story_type_summary": dict(story_types),
+    }
+
+def build_technical_backlog_pdf(report_data):
+    report_data = report_data or {}
+    rows = report_data.get("story_rows", []) or []
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=28,
+        leftMargin=28,
+        topMargin=28,
+        bottomMargin=28
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "BacklogTitle",
+        parent=styles["Heading1"],
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor("#1f1f1f"),
+        spaceAfter=10,
+        alignment=TA_LEFT
+    )
+
+    section_style = ParagraphStyle(
+        "BacklogSection",
+        parent=styles["Heading2"],
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#1f1f1f"),
+        spaceBefore=10,
+        spaceAfter=6,
+        alignment=TA_LEFT
+    )
+
+    body_style = ParagraphStyle(
+        "BacklogBody",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#333333"),
+        alignment=TA_LEFT
+    )
+
+    story = []
+
+    story.append(Paragraph(report_data.get("document_title", "Technical Backlog Implementation Report"), title_style))
+    story.append(Paragraph(report_data.get("executive_overview", "-"), body_style))
+    story.append(Spacer(1, 0.12 * inch))
+
+    def add_section(title_text, value):
+        story.append(Paragraph(title_text, section_style))
+        if isinstance(value, list):
+            if value:
+                for item in value:
+                    story.append(Paragraph(f"• {str(item)}", body_style))
+            else:
+                story.append(Paragraph("-", body_style))
+        else:
+            story.append(Paragraph(str(value or "-"), body_style))
+        story.append(Spacer(1, 0.08 * inch))
+
+    add_section("Business Purpose", report_data.get("business_purpose"))
+    add_section("Scope", report_data.get("scope"))
+    add_section("Visual Flow", report_data.get("visual_flow"))
+    add_section("Design Flow", report_data.get("design_flow"))
+    add_section("Components / Modules", report_data.get("components"))
+    add_section("Owners / Workstreams", report_data.get("owner_summary"))
+    add_section("Dependencies", report_data.get("dependencies"))
+    add_section("Risks", report_data.get("risks"))
+    add_section("Recommendations", report_data.get("recommendations"))
+
+    story.append(Paragraph("Functional Details Definition", section_style))
+
+    table_rows = [[
+        Paragraph("<b>ID</b>", body_style),
+        Paragraph("<b>Title</b>", body_style),
+        Paragraph("<b>Description</b>", body_style),
+        Paragraph("<b>Owner</b>", body_style),
+        Paragraph("<b>Priority</b>", body_style),
+        Paragraph("<b>Complexity</b>", body_style),
+    ]]
+
+    for item in rows:
+        table_rows.append([
+            Paragraph(str(item.get("id") or "-"), body_style),
+            Paragraph(str(item.get("title") or "-"), body_style),
+            Paragraph(str(item.get("description") or "-"), body_style),
+            Paragraph(str(item.get("owner") or "-"), body_style),
+            Paragraph(str(item.get("priority") or "-"), body_style),
+            Paragraph(str(item.get("complexity") or "-"), body_style),
+        ])
+
+    details_table = Table(
+        table_rows,
+        colWidths=[0.55 * inch, 1.35 * inch, 2.6 * inch, 0.9 * inch, 0.7 * inch, 0.8 * inch],
+        repeatRows=1
+    )
+    details_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f2f4f7")),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d0d5dd")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e4e7ec")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(details_table)
+    story.append(Spacer(1, 0.12 * inch))
+
+    story.append(Paragraph("Acceptance Criteria by Item", section_style))
+    for idx, item in enumerate(rows, start=1):
+        title = item.get("title") or item.get("id") or f"Item {idx}"
+        story.append(Paragraph(f"<b>{title}</b>", body_style))
+        criteria = item.get("acceptance_criteria", []) or []
+        if criteria:
+            for c in criteria:
+                story.append(Paragraph(f"• {c}", body_style))
+        else:
+            story.append(Paragraph("• No acceptance criteria provided", body_style))
+        deps = item.get("dependencies", []) or []
+        if deps:
+            story.append(Paragraph(f"<b>Dependencies:</b> {', '.join(deps)}", body_style))
+        story.append(Spacer(1, 0.06 * inch))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def is_excel_backlog_payload(data):
+    return isinstance(data, dict) and data.get("document_type") == "technical_backlog_excel"
 
 # ------------------------------
 # CONFIDENCE + VALIDATION
