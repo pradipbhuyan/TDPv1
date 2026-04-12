@@ -727,19 +727,37 @@ def process_single_file(uploaded_file):
     update_progress(5, "Ingestion Agent — file received")
     record_agent_event("Ingestion Agent", "done", "File received")
 
-    record_agent_event("Extraction Agent", "running", "Extracting text")
-    extracted = process_file_with_fallback(uploaded_file)
-    docs = extracted["documents"]
-    full_text = extracted["text"]
+    suffix = Path(uploaded_file.name).suffix.lower()
+    source_type = "excel_backlog" if suffix == ".xlsx" else "document"
 
-    if extracted["ocr_used"]:
-        record_agent_event("Extraction Agent", "done", "Text extracted using OCR fallback")
+    if source_type == "excel_backlog":
+        temp_path = save_temp_file(uploaded_file)
+        extracted = {
+            "documents": [],
+            "text": f"Excel backlog source: {uploaded_file.name}",
+            "ocr_used": False,
+            "extraction_mode": "xlsx_backlog",
+            "exception_reason": None,
+            "temp_path": temp_path,
+        }
+        docs = []
+        full_text = extracted["text"]
+        record_agent_event("Extraction Agent", "done", "Excel backlog loaded")
+        update_progress(20, "Extraction Agent — Excel backlog loaded")
     else:
-        record_agent_event("Extraction Agent", "done", "Text extracted")
+        record_agent_event("Extraction Agent", "running", "Extracting text")
+        extracted = process_file_with_fallback(uploaded_file)
+        docs = extracted["documents"]
+        full_text = extracted["text"]
 
-    update_progress(20, "Extraction Agent — text extracted")
+        if extracted["ocr_used"]:
+            record_agent_event("Extraction Agent", "done", "Text extracted using OCR fallback")
+        else:
+            record_agent_event("Extraction Agent", "done", "Text extracted")
 
-    if not full_text:
+        update_progress(20, "Extraction Agent — text extracted")
+
+    if not full_text and source_type != "excel_backlog":
         reason = extracted["exception_reason"] or "No extractable text"
         return {
             "file_name": uploaded_file.name,
@@ -759,22 +777,28 @@ def process_single_file(uploaded_file):
 
     st.session_state.full_text = full_text
 
-    record_agent_event("Retrieval Agent", "running", "Creating vector index")
-    vectorstore = create_vectorstore(docs)
-    st.session_state.vectorstore = vectorstore
-    record_agent_event("Retrieval Agent", "done", "Vector index created")
-    update_progress(30, "Retrieval Agent — search index ready")
+    vectorstore = None
+    if docs:
+        record_agent_event("Retrieval Agent", "running", "Creating vector index")
+        vectorstore = create_vectorstore(docs)
+        st.session_state.vectorstore = vectorstore
+        record_agent_event("Retrieval Agent", "done", "Vector index created")
+        update_progress(30, "Retrieval Agent — search index ready")
+    else:
+        record_agent_event("Retrieval Agent", "done", "Vector index skipped for structured Excel input")
+        update_progress(30, "Retrieval Agent — structured input ready")
 
     graph = build_graph()
     graph_input = {
         "text": full_text,
-        "filename": uploaded_file.name,
+        "filename": extracted.get("temp_path", uploaded_file.name),
         "template": get_active_template_bytes(),
         "progress": update_progress,
         "event_callback": record_agent_event,
         "ocr_used": extracted["ocr_used"],
         "extraction_mode": extracted["extraction_mode"],
         "exception_reason": extracted["exception_reason"],
+        "source_type": source_type,
     }
 
     before_cost = st.session_state["metrics"]["cost"]
@@ -819,8 +843,6 @@ def process_single_file(uploaded_file):
     after_tokens = st.session_state["metrics"]["tokens"]
 
     status = "Completed"
-    if extracted.get("exception_reason") and not full_text:
-        status = "Exception"
 
     record_agent_event("Workflow Agent", "done", "Technical document processing completed")
     update_progress(100, "Workflow Agent — completed")
@@ -965,7 +987,7 @@ def render_sidebar_and_upload():
     with c1:
         uploaded_files = st.file_uploader(
             f"Upload technical documents - max {MAX_BATCH_FILES} files per batch",
-            type=["txt", "pdf", "docx", "pptx", "png", "jpg", "jpeg"],
+            type=["txt", "pdf", "docx", "pptx", "xlsx", "png", "jpg", "jpeg"],
             accept_multiple_files=True,
             key=f"main_file_uploader_{st.session_state.uploader_key}"
         )
@@ -1166,6 +1188,22 @@ def render_result_workspace():
         if not data.get("open_questions"):
             st.caption("• None extracted")
 
+    story_rows = data.get("story_rows", [])
+    if story_rows:
+        with st.expander("Backlog Item Details", expanded=True):
+            rows = []
+            for item in story_rows:
+                rows.append({
+                    "ID": item.get("id"),
+                    "Title": item.get("title"),
+                    "Owner": item.get("owner"),
+                    "Priority": item.get("priority"),
+                    "Complexity": item.get("complexity"),
+                    "Module": item.get("module"),
+                    "Dependencies": ", ".join(item.get("dependencies", [])),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    
     t1, t2, t3, t4 = st.columns(4)
 
     with t1:
