@@ -3,6 +3,7 @@ import time
 
 from langgraph.graph import StateGraph, END
 
+
 from core import (
     detect_document_type,
     extract_structured_json,
@@ -12,6 +13,9 @@ from core import (
     generate_technical_report_data,
     build_technical_architecture_pdf,
     build_technical_architecture_docx,
+    extract_technical_backlog_from_excel,
+    generate_technical_backlog_report_data,
+    build_technical_backlog_pdf,
 )
 
 class IDPState(TypedDict, total=False):
@@ -23,6 +27,7 @@ class IDPState(TypedDict, total=False):
     ocr_used: bool
     extraction_mode: str
     exception_reason: str
+    source_type: str
 
     doc_type: str
     data: dict
@@ -94,13 +99,18 @@ def extract_node(state: IDPState) -> IDPState:
     started_at = time.time()
     before = get_current_metrics_snapshot()
 
+    source_type = state.get("source_type", "")
+
     emit_agent_event(state, "Structuring Agent", "running", "Extracting technical document structure")
     safe_progress(state, 60, "Structuring Agent — extracting technical structure")
 
-    state["data"] = extract_structured_json(state.get("text", ""), "technical_doc")
+    if source_type == "excel_backlog":
+        rows = extract_technical_backlog_from_excel(state.get("filename", ""))
+        state["data"] = generate_technical_backlog_report_data(rows)
+    else:
+        state["data"] = extract_structured_json(state.get("text", ""), "technical_doc")
 
     emit_agent_event(state, "Structuring Agent", "done", "Technical document structure extracted")
-
     add_step_metric(state, "Extract technical document data", started_at, before, "technical_doc")
     return state
 
@@ -109,11 +119,18 @@ def technical_doc_node(state: IDPState) -> IDPState:
     before = get_current_metrics_snapshot()
 
     data = state.get("data") or {}
-    report_data = generate_technical_report_data(data)
+    source_type = state.get("source_type", "")
 
-    summary_md = generate_technical_summary_markdown(report_data)
-    summary_pdf = build_technical_architecture_pdf(report_data)
-    summary_docx = build_technical_architecture_docx(report_data)
+    if source_type == "excel_backlog":
+        report_data = data
+        summary_md = generate_technical_summary_markdown(report_data)
+        summary_pdf = build_technical_backlog_pdf(report_data)
+        summary_docx = build_technical_architecture_docx(report_data)
+    else:
+        report_data = generate_technical_report_data(data)
+        summary_md = generate_technical_summary_markdown(report_data)
+        summary_pdf = build_technical_architecture_pdf(report_data)
+        summary_docx = build_technical_architecture_docx(report_data)
 
     emit_agent_event(state, "Output Agent", "running", "Preparing architecture report pack")
     safe_progress(state, 85, "Output Agent — preparing architecture report pack")
